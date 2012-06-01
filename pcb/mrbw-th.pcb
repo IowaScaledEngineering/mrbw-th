@@ -1,5 +1,5 @@
 # release: pcb 20100929
-# date:    Fri May 25 19:59:02 2012
+# date:    Thu May 31 21:34:54 2012
 # user:    railfan (Michael Petersen,,,)
 # host:    sylvanite
 
@@ -1228,7 +1228,7 @@ Element["" "TQFP32" "U2" "unknown" 91000 126000 -22000 15000 0 100 ""]
 
 	)
 
-Element["" "crystal-hc49" "Y1" "12MHz" 141000 162500 -29843 -7000 0 100 ""]
+Element["" "crystal-hc49" "Y1" "12MHz" 141000 162500 19157 -14000 0 100 ""]
 (
 	Attribute("author" "Alexander Kurz")
 	Attribute("copyright" "2008 Alexander Kurz")
@@ -2026,9 +2026,10 @@ Layer(4 "silk")
 	Text[155500 9000 2 100 "GND" "clearline"]
 	Text[209500 39500 2 100 "VBAT" "clearline"]
 	Text[163000 134000 0 100 "http://iascaled.com" "clearline"]
-	Text[60000 166500 0 100 "MRBW-TH / MRB-TH" "clearline"]
-	Text[43000 125500 0 100 "(C)2012" "clearline"]
 	Text[137500 130500 1 100 "Iowa Scaled Engineering" "clearline"]
+	Text[43000 125500 0 100 "(C)2012" "clearline"]
+	Text[60000 166500 0 100 "MRBW-TH / MRB-TH" "clearline"]
+	Text[104500 159500 0 100 "v1.0" "clearline"]
 )
 NetList()
 (
