@@ -1,5 +1,5 @@
 # release: pcb 20100929
-# date:    Thu May 31 21:34:54 2012
+# date:    Thu Jun  7 21:37:31 2012
 # user:    railfan (Michael Petersen,,,)
 # host:    sylvanite
 
@@ -878,7 +878,7 @@ Element["" "RHT03" "U3" "unknown" 17000 67000 10000 -37000 0 100 ""]
 
 	)
 
-Element["" "MSS6132" "L1" "4.7uH" 162543 120000 -15543 13457 0 100 ""]
+Element["" "MSS6132" "L1" "4.7uH" 162543 120000 15457 5957 0 100 ""]
 (
 	Pad[10700 -10700 10700 10700 2300 2000 2900 "1" "1" "square"]
 	Pad[5100 -10700 10700 -10700 2300 2000 2900 "1" "1" "square,edge2"]
