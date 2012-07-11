@@ -105,7 +105,8 @@ void initialize100HzTimer(void)
 {
 	// Set up timer 1 for 100Hz interrupts
 	TCNT0 = 0;
-	OCR0A = 0xC2;
+	//OCR0A = 0xC2;
+	OCR0A = 0x6C; // Appropriate for 11.0592 MHz
 	ticks = 0;
 	secs = 0;
 	TCCR0A = _BV(WGM01);
@@ -227,16 +228,16 @@ void init(void)
 {
 	// FIXME:  Do any initialization you need to do here.
 	DDRC &= ~_BV(PC3);
-	PORTC &= ~_BV(PC3);
-
+	PORTC &= ~(_BV(PC3) | _BV(PC5));
+	DDRC |= _BV(PC5);
 	// Initialize MRBus address from EEPROM address 1
 	mrbus_dev_addr = eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_ADDR);
 }
 
 
-uint8_t dht11_bitnum=0;
-uint8_t dht11_data[5];
-uint8_t dht11_read_complete=0;
+volatile uint8_t dht11_bitnum=0;
+volatile uint8_t dht11_data[5];
+volatile uint8_t dht11_read_complete=3;
 
 void initializeDHT11Timer()
 {
@@ -250,39 +251,42 @@ void initializeDHT11Timer()
 ISR(PCINT1_vect)
 {
 	// This is used by the DHT11 code to read asynchronously to the main loop
-	if(PINC & _BV(PC3))
+	if(!(PINC & _BV(PC3)))
 	{
 		uint8_t timerval = TCNT2;
-		// It was the rising edge.
+		// It was the falling edge.
 		// 26-28ms in the timer indicates that it's a 0, 70ms indicates a 1
-		if (timerval > X && timerval < Y)
+		// 0.7265625uS per count
+		// A logic zero will be between 27 and 48
+		// A logic one will be between 83 and 110
+		
+		TCNT2 = 0;
+		if (timerval > 83 && timerval < 110)
 		{
 			// It's a one, put one in the correct place
 			dht11_data[dht11_bitnum / 8] |= 1<<(7-(dht11_bitnum % 8));
 		
 		}
 		dht11_bitnum++;
-		TCNT2 = 0;	
 	}
 	else
 	{
-		// It's the falling edge, indicating that we're at the beginning of a clock period
+		// It's the rising edge, indicating that we're at the beginning of a clock period
 		// Reset the timer
 		TCNT2 = 0;
 		TIMSK2 |= _BV(TOIE2);
 	}
 
-	if(dht11_bitnum > 40)
+	if(dht11_bitnum >= 40)
 	{
+		PORTC &= ~_BV(PC5);	
 		// We're done, indicate complete and shut down the interrupt
-		dht_read_complete = 1;
+		dht11_read_complete = 1;
 
 		// Shut down the PCINT11 interrupt
 		PCIFR |= _BV(PCIF1);
 		PCICR &= ~_BV(PCIE1);
-		
 		TIMSK2 &= ~_BV(TOIE2);
-	
 	}
 }
 
@@ -290,14 +294,87 @@ ISR(PCINT1_vect)
 ISR(TIMER2_OVF_vect)
 {
 	// We overflowed, meaning the DHT11 stopped responding correctly
-	dht_read_complete = 2;
+	dht11_read_complete = 2;
 
 	// Shut down Timer 2
 	TIMSK2 &= ~_BV(TOIE2);
-
+	PORTC &= ~_BV(PC5);	
 	// Shut down the PCINT11 interrupt
 	PCIFR |= _BV(PCIF1);
 	PCICR &= ~_BV(PCIE1);
+}
+
+void dht11_start_conversion()
+{
+	uint8_t countdown = 20;
+	// Get triggery
+	// Set DHT11 data wire to ground for 20ms
+
+	initializeDHT11Timer();
+
+	dht11_bitnum=0;
+	memset(dht11_data, 0, sizeof(dht11_data));
+	dht11_read_complete=0;
+
+	DDRC |= _BV(PC3);	
+	while (countdown-- != 0)
+	{
+		_delay_ms(1);
+		if (mrbus_state & MRBUS_RX_PKT_READY)
+			PktHandler();			
+	}
+	
+	// Clear all the timer interrupts - chances are we've overflowed
+	//  since the last time we started
+	TIFR2 |= 0x07;
+	// Clear the timer counter and enable the interrupt
+	TCNT2 = 0;
+	TIMSK2 |= _BV(TOIE2);
+
+	DDRC &= ~_BV(PC3);
+	TCNT2 = 0;
+
+	// 20-40uS high after AVR releases the line
+	// Wait for the low for up to 186uS
+	while ((PINC & _BV(PC3)) && 0 == dht11_read_complete);
+	
+	// Failure, the DHT11 didn't respond, return
+	if (0 != dht11_read_complete)
+	{
+		dht11_read_complete = 2;
+		return;
+	}
+
+	TCNT2 = 0;
+	// After going high for 20-40uS, the DHT11 should pull it low 
+	// for 80uS, then high again for 80uS
+	// Wait up to 186 uS for the high.
+	while (!(PINC & _BV(PC3)) && 0 == dht11_read_complete);
+
+	// Failure, the DHT11 didn't respond, return
+	if (0 != dht11_bitnum)
+	{
+		dht11_read_complete = 2;
+		return;
+	}
+
+	// 20-40uS high after AVR releases the line
+	// Wait for the low for up to 186uS
+	while ((PINC & _BV(PC3)) && 0 == dht11_read_complete);
+
+	TCNT2 = 0;
+	// Failure, the DHT11 didn't respond, return
+	if (0 != dht11_read_complete)
+	{
+		dht11_read_complete = 2;
+		return;
+	}
+
+	// If we're here, we're on the low ahead of the first bit.  
+	// Enable pin change interrupt and go!
+	PCMSK1 = _BV(PCINT11);
+	PCIFR |= _BV(PCIF1);
+	PCICR |= _BV(PCIE1);
 }
 
 
@@ -326,39 +403,78 @@ int main(void)
 			PktHandler();
 			
 		// FIXME: Do any module-specific behaviours here in the loop.
-		if (secs >= 2)
+		
+		// Notes of warning - DANGER, WILL ROBINSON!  DANGER!
+		// DHT11/DHT22/RHT03 must *NOT* be accessed within the first second of being powered up
+		// DHT11/DHT22/RHT03 must *NOT* be read more than once every 2 seconds
+		// Both of these restrictions come from the datasheet
+		
+		if (secs >= 2 && 0 != dht11_read_complete)
 		{
-			uint8_t countdown = 20;
-			// Get triggery
-			// Set DHT11 data wire to ground for 20ms
-
-			dht11_bitnum=0;
-			memset(dht11_data, 0, sizeof(dht11_data));
-			dht11_read_complete=0;
-			
-			DDRC |= _BV(PC3);	
-			while (countdown-- != 0)
-			{
-				_delay_ms(1);
-				if (mrbus_state & MRBUS_RX_PKT_READY)
-					PktHandler();			
-			}
-			DDRC &= ~_BV(PC3);
-
-			// Wait for ack
-			while(!(PINC & _BV(PC3)));
-			
-			PCMSK1 = _BV(PCINT11);
-			PCIFR |= _BV(PCIF1);
-			PCICR |= _BV(PCIE1);
-			TCNT2 = 0;
-			TIMSK2 |= _BV(TOIE2);
-			
 			secs = 0;
+			dht11_start_conversion();
 		}
+		
+		if (1 == dht11_read_complete)
+		{
+			uint16_t kelvinTemp = 4370; // Expressed in 1/16ths K, base of 273.15 K
+			uint16_t relHumidity = 0; // Expressed in 1/10ths % RH
+			uint16_t temp;
+			// This is where things get ugly
+			// For the DHT11 data bytes:
+			//   0: integer humidity %
+			//   1: unused, reads as 0
+			//   2: integer temperature in C, (high bit indicates negative temp)
+			//   3: unused, reads as 0
+			//   4: checksum (literally a sum of the first four bytes)
+			// For the DHT22/RHT03 data bytes:
+			//   0: high 8 bits of humidity, in 1/10ths of %
+			//   1: low 8 bits of humidity, in 1/10ths of %
+			//   2: high 8 bits of temp in C, in 1/10ths of degrees (high bit indicates negative temp)
+			//   3: low 8 bits of temp in C, in 1/10ths of degrees
+			//   4: checksum (literally a sum of the first four bytes)
+			// There's no systemic way to tell these things apart, so we have to be configured one way or the other
 
+#define sensorIsDHT11 1
+#define sensorIsDHT22 0
+
+			if (sensorIsDHT11)
+			{
+				relHumidity = (uint16_t)dht11_data[0] * 10;
+				temp = (uint16_t)(dht11_data[2] & 0x7F);
+				temp <<= 4;
+				if (dht11_data[2] & 0x80)
+					kelvinTemp -= temp;
+				else
+					kelvinTemp += temp;
+			}
+			else if (sensorIsDHT22)
+			{
+				relHumidity = (((uint16_t)dht11_data[0])<<8) + (uint16_t)dht11_data[1];
+				temp = ((uint16_t)((dht11_data[2] & 0x7F))<<8)+(uint16_t)dht11_data[3];
+				temp *= 8;
+				temp /= 5;
+				
+				if (dht11_data[2] & 0x80)
+					kelvinTemp -= temp;
+				else
+					kelvinTemp += temp;
 			
+			}
 
+			mrbus_tx_buffer[MRBUS_PKT_SRC] = mrbus_dev_addr;
+			mrbus_tx_buffer[MRBUS_PKT_DEST] = 0xFF;
+			mrbus_tx_buffer[MRBUS_PKT_LEN] = 10;
+			mrbus_tx_buffer[5] = 'S';
+			mrbus_tx_buffer[6] = (kelvinTemp >> 8);
+			mrbus_tx_buffer[7] = kelvinTemp & 0xff;
+			mrbus_tx_buffer[8] = (relHumidity >> 8);
+			mrbus_tx_buffer[9] = relHumidity & 0xff;
+						
+			mrbus_state |= MRBUS_TX_PKT_READY;
+			dht11_read_complete = 3;			
+		}
+		
 		// If we have a packet to be transmitted, try to send it here
 		while(mrbus_state & MRBUS_TX_PKT_READY)
 		{
