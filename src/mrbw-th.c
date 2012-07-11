@@ -279,14 +279,17 @@ ISR(PCINT1_vect)
 
 	if(dht11_bitnum >= 40)
 	{
-		PORTC &= ~_BV(PC5);	
-		// We're done, indicate complete and shut down the interrupt
-		dht11_read_complete = 1;
-
 		// Shut down the PCINT11 interrupt
 		PCIFR |= _BV(PCIF1);
 		PCICR &= ~_BV(PCIE1);
 		TIMSK2 &= ~_BV(TOIE2);
+
+		if ((dht11_data[0] + dht11_data[1] + dht11_data[2] + dht11_data[3]) == dht11_data[4])
+			// We're done, indicate complete and shut down the interrupt
+			dht11_read_complete = 1;
+		else
+			dht11_read_complete = 2; // Indicate failure - checksums didn't match
+
 	}
 }
 
@@ -326,9 +329,9 @@ void dht11_start_conversion()
 	
 	// Clear all the timer interrupts - chances are we've overflowed
 	//  since the last time we started
+	TCNT2 = 0;
 	TIFR2 |= 0x07;
 	// Clear the timer counter and enable the interrupt
-	TCNT2 = 0;
 	TIMSK2 |= _BV(TOIE2);
 
 	DDRC &= ~_BV(PC3);
