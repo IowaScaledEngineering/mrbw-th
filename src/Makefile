@@ -69,7 +69,13 @@ FUSE_L  = 0xD7
 FUSE_H  = 0xD5
 FUSE_E  = 0x00
 
+# Define the sensor type used on the board.
+# Options are:
+#  DHT11
+#  DHT22 (works for the RHT03 as well)
+#  TMP275
 
+SENSOR=DHT11
 
 # MRBus
 DEFINES = -DMRBUS
@@ -89,7 +95,7 @@ OBJS = ${SRCS:.c=.o}
 INCLUDES = -I. -I../../mrbus/src -I../../mrbee/src
 CFLAGS  = $(INCLUDES) -Wall -Os
 
-COMPILE = avr-gcc $(DEFINES) -DF_CPU=$(F_CPU) $(CFLAGS) -mmcu=$(DEVICE)
+COMPILE = avr-gcc $(DEFINES) -D$(SENSOR) -DF_CPU=$(F_CPU) $(CFLAGS) -mmcu=$(DEVICE)
 
 # -E -dM options preprocess only and output results of #define
 #COMPILE = avr-gcc -Wall -Os -DF_CPU=$(F_CPU) $(CFLAGS) -mmcu=$(DEVICE) -E -dM

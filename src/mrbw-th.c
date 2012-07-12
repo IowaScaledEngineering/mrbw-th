@@ -232,8 +232,16 @@ void init(void)
 	DDRC |= _BV(PC5);
 	// Initialize MRBus address from EEPROM address 1
 	mrbus_dev_addr = eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_ADDR);
+	
+	// Setup ADC
+	ADMUX  = 0x47;  // AVCC reference; ADC7 input
+	ADCSRA = 0x87;  // 128 prescaler
+	ADCSRB = 0x00;
+	DIDR0  = 0x00;  // No digitals were harmed in the making of this ADC
+	
 }
 
+#if defined DHT11 || defined DHT22
 
 volatile uint8_t dht11_bitnum=0;
 volatile uint8_t dht11_data[5];
@@ -380,7 +388,7 @@ void dht11_start_conversion()
 	PCICR |= _BV(PCIE1);
 }
 
-
+#endif
 
 int main(void)
 {
@@ -407,6 +415,11 @@ int main(void)
 			
 		// FIXME: Do any module-specific behaviours here in the loop.
 		
+		
+
+// BEGIN DHT11 / DHT22 sensor section
+#if defined DHT11 || defined DHT22
+		
 		// Notes of warning - DANGER, WILL ROBINSON!  DANGER!
 		// DHT11/DHT22/RHT03 must *NOT* be accessed within the first second of being powered up
 		// DHT11/DHT22/RHT03 must *NOT* be read more than once every 2 seconds
@@ -415,14 +428,28 @@ int main(void)
 		if (secs >= 2 && 0 != dht11_read_complete)
 		{
 			secs = 0;
+			// Enable the bus voltage converter, start conversion, and clear the interrupt flag
+			ADCSRA |= _BV(ADSC) | _BV(ADIF);
+
 			dht11_start_conversion();
+
+			// The conversion should be done - DHT11 start takes way longer than ADC conversion			
+			while (ADCSRA & _BV(ADSC));
+			// Turn the ADC back off
+			//ADCSRA &= ~(_BV(ADEN));
 		}
+		
+		
+		
+		// dht11_read_complete will go to 1 on a successful conversion
+		// 0 means not done, 2 means an error occurred, and 3 means idle
 		
 		if (1 == dht11_read_complete)
 		{
 			uint16_t kelvinTemp = 4370; // Expressed in 1/16ths K, base of 273.15 K
 			uint16_t relHumidity = 0; // Expressed in 1/10ths % RH
 			uint16_t temp;
+			uint8_t vbus;
 			// This is where things get ugly
 			// For the DHT11 data bytes:
 			//   0: integer humidity %
@@ -438,46 +465,56 @@ int main(void)
 			//   4: checksum (literally a sum of the first four bytes)
 			// There's no systemic way to tell these things apart, so we have to be configured one way or the other
 
-#define sensorIsDHT11 1
-#define sensorIsDHT22 0
+#ifdef DHT11
+			relHumidity = (uint16_t)dht11_data[0] * 2;
+			temp = (uint16_t)(dht11_data[2] & 0x7F);
+			temp <<= 4;
+			if (dht11_data[2] & 0x80)
+				kelvinTemp -= temp;
+			else
+				kelvinTemp += temp;
 
-			if (sensorIsDHT11)
-			{
-				relHumidity = (uint16_t)dht11_data[0] * 10;
-				temp = (uint16_t)(dht11_data[2] & 0x7F);
-				temp <<= 4;
-				if (dht11_data[2] & 0x80)
-					kelvinTemp -= temp;
-				else
-					kelvinTemp += temp;
-			}
-			else if (sensorIsDHT22)
-			{
-				relHumidity = (((uint16_t)dht11_data[0])<<8) + (uint16_t)dht11_data[1];
-				temp = ((uint16_t)((dht11_data[2] & 0x7F))<<8)+(uint16_t)dht11_data[3];
-				temp *= 8;
-				temp /= 5;
-				
-				if (dht11_data[2] & 0x80)
-					kelvinTemp -= temp;
-				else
-					kelvinTemp += temp;
+#elif defined DHT22
+			relHumidity = (((uint16_t)dht11_data[0])<<8) + (uint16_t)dht11_data[1];
+			temp = ((uint16_t)((dht11_data[2] & 0x7F))<<8)+(uint16_t)dht11_data[3];
+			temp *= 8;
+			temp /= 5;
 			
-			}
+			relHumdity /= 5;
+			
+			if (dht11_data[2] & 0x80)
+				kelvinTemp -= temp;
+			else
+				kelvinTemp += temp;
+			
+#endif
+
+			// Get bus voltage
+			//temp = ((uint16_t)ADCH<<8) + (uint16_t)ADCL;
+
+			// Voltage on the pin will be either be 1/6 bus voltage or 1:1 bat voltage
+			// Avcc will be either 5V or 3.3V
+
+
+//1024 = AVCC * 6 * 10
 
 			mrbus_tx_buffer[MRBUS_PKT_SRC] = mrbus_dev_addr;
 			mrbus_tx_buffer[MRBUS_PKT_DEST] = 0xFF;
-			mrbus_tx_buffer[MRBUS_PKT_LEN] = 10;
+			mrbus_tx_buffer[MRBUS_PKT_LEN] = 11;
 			mrbus_tx_buffer[5] = 'S';
-			mrbus_tx_buffer[6] = (kelvinTemp >> 8);
-			mrbus_tx_buffer[7] = kelvinTemp & 0xff;
-			mrbus_tx_buffer[8] = (relHumidity >> 8);
+			mrbus_tx_buffer[6] = 0;  // Status byte.  Lower three bits are sensor type, 000 = DHT11/DHT22/RHT03
+			mrbus_tx_buffer[7] = (kelvinTemp >> 8);
+			mrbus_tx_buffer[8] = kelvinTemp & 0xff;
 			mrbus_tx_buffer[9] = relHumidity & 0xff;
-						
+            mrbus_tx_buffer[10] = ADCL;
+            						
 			mrbus_state |= MRBUS_TX_PKT_READY;
 			dht11_read_complete = 3;			
 		}
-		
+// END of DHT11 / DHT22 / RHT03 read section
+#endif
+
+
 		// If we have a packet to be transmitted, try to send it here
 		while(mrbus_state & MRBUS_TX_PKT_READY)
 		{
