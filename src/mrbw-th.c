@@ -48,45 +48,14 @@ extern uint8_t mrbus_tx_buffer[MRBUS_BUFFER_SIZE];
 extern uint8_t mrbus_state;
 
 uint8_t mrbus_dev_addr = 0;
+uint8_t th_state = TH_STATE_IDLE;
 
+#define TH_STATE_IDLE          0x00
+#define TH_STATE_TRIGGER       0x10 
+#define TH_STATE_WAIT          0x20
+#define TH_STATE_READ          0x30
+#define TH_STATE_SEND_PACKET   0x40
 
-
-#ifdef ACCURATE_TIMER
-
-// ******** Start 100 Hz Timer - Very Accurate Version
-
-// Initialize a 100Hz timer for use in triggering events.
-// If you need the timer resources back, you can remove this, but I find it
-// rather handy in triggering things like periodic status transmissions.
-// If you do remove it, be sure to yank the interrupt handler and ticks/secs as well
-// and the call to this function in the main function
-
-uint8_t ticks;
-uint8_t secs;
-
-void initialize100HzTimer(void)
-{
-	// Set up timer 1 for 100Hz interrupts
-	TCCR1A = 0;
-	TCCR1B = _BV(CS11) | _BV(CS10);
-	TCCR1C = 0;
-	TIMSK1 = _BV(TOIE1);
-	ticks = 0;
-	secs = 0;
-}
-
-ISR(TIMER1_OVF_vect)
-{
-	TCNT1 += 0xF3CB;
-	ticks++;
-	if (ticks >= 100)
-	{
-		ticks = 0;
-		secs++;
-	}
-}
-
-#else
 
 // ******** Start 100 Hz Timer, 0.16% error version (Timer 0)
 // If you can live with a slightly less accurate timer, this one only uses Timer 0, leaving Timer 1 open
@@ -98,17 +67,16 @@ ISR(TIMER1_OVF_vect)
 // If you do remove it, be sure to yank the interrupt handler and ticks/secs as well
 // and the call to this function in the main function
 
-uint8_t ticks;
-uint8_t secs;
+volatile uint8_t ticks;
+volatile uint8_t decisecs;
 
 void initialize100HzTimer(void)
 {
 	// Set up timer 1 for 100Hz interrupts
 	TCNT0 = 0;
-	//OCR0A = 0xC2;
-	OCR0A = 0x6C; // Appropriate for 11.0592 MHz
+	OCR0A = 0xC2;
 	ticks = 0;
-	secs = 0;
+	decisecs = 0;
 	TCCR0A = _BV(WGM01);
 	TCCR0B = _BV(CS02) | _BV(CS00);
 	TIMSK0 |= _BV(OCIE0A);
@@ -116,12 +84,11 @@ void initialize100HzTimer(void)
 
 ISR(TIMER0_COMPA_vect)
 {
-	if (++ticks >= 100)
+	if (++ticks >= 10)
 	{
 		ticks = 0;
-		secs++;
+		decisecs++;
 	}
-	PORTB ^= _BV(PB0);
 }
 
 // End of 100Hz timer
@@ -240,6 +207,17 @@ void init(void)
 	DIDR0  = 0x00;  // No digitals were harmed in the making of this ADC
 	
 }
+
+volatile uint16_t busVoltage=0;
+volatile uint8_t busVoltageCount=0;
+
+ISR(ADC_vect)
+{
+	busVoltage = ADCL + (ADCH << 8);
+	busVoltageCount++;
+}
+
+
 
 #if defined DHT11 || defined DHT22
 
@@ -390,8 +368,19 @@ void dht11_start_conversion()
 
 #endif
 
+
 int main(void)
 {
+	uint16_t kelvinTemp = 4370; // Expressed in 1/16ths K, base of 273.15 K
+	uint16_t relHumidity = 0; // Expressed in 1/10ths % RH
+	uint8_t vbus=0;
+
+#if defined DHT11 || defined DHT22
+	uint8_t dht11_powerup_lockout = 1;
+#else
+	uint8_t dht11_powerup_lockout = 0;
+#endif
+
 	// Application initialization
 	init();
 
@@ -412,44 +401,48 @@ int main(void)
 		// Handle any packets that may have come in
 		if (mrbus_state & MRBUS_RX_PKT_READY)
 			PktHandler();
-			
-		// FIXME: Do any module-specific behaviours here in the loop.
-		
-		
 
-// BEGIN DHT11 / DHT22 sensor section
-#if defined DHT11 || defined DHT22
-		
 		// Notes of warning - DANGER, WILL ROBINSON!  DANGER!
 		// DHT11/DHT22/RHT03 must *NOT* be accessed within the first second of being powered up
 		// DHT11/DHT22/RHT03 must *NOT* be read more than once every 2 seconds
 		// Both of these restrictions come from the datasheet
-		
-		if (secs >= 2 && 0 != dht11_read_complete)
+
+		if (dht11_powerup_lockout && decisecs > 12)
+			dht11_powerup_lockout = 0;
+
+		if (!dht11_powerup_lockout && decisecs >= pkt_period)
 		{
-			secs = 0;
-			// Enable the bus voltage converter, start conversion, and clear the interrupt flag
-			ADCSRA |= _BV(ADSC) | _BV(ADIF);
+			if(TH_STATE_IDLE == th_state)
+				th_state = TH_STATE_TRIGGER;
 
-			dht11_start_conversion();
-
-			// The conversion should be done - DHT11 start takes way longer than ADC conversion			
-			while (ADCSRA & _BV(ADSC));
-			// Turn the ADC back off
-			//ADCSRA &= ~(_BV(ADEN));
+			decisecs = 0;
 		}
-		
-		
-		
-		// dht11_read_complete will go to 1 on a successful conversion
-		// 0 means not done, 2 means an error occurred, and 3 means idle
-		
-		if (1 == dht11_read_complete)
+
+		if (TH_STATE_TRIGGER == th_state)
 		{
-			uint16_t kelvinTemp = 4370; // Expressed in 1/16ths K, base of 273.15 K
-			uint16_t relHumidity = 0; // Expressed in 1/10ths % RH
+#if defined DHT11 || defined DHT22
+			dht11_start_conversion();
+#endif
+			// Trigger an ADC conversion
+			ADCSRA |= _BV(ADEN) | _BV(ADSC);
+			th_state = TH_STATE_WAIT;
+		}
+		else if (TH_STATE_WAIT == th_state)
+		{
+			uint8_t conversionComplete = 0;
+
+#if defined DHT11 || defined DHT22
+			if (dht11_read_complete)
+				conversionComplete = 1;
+#endif
+
+			if ( conversionComplete && !(ADCSRA & _BV(ADSC)) )
+				th_state = TH_STATE_READ;
+
+		}
+		else if (TH_STATE_READ = th_state)
+		{
 			uint16_t temp;
-			uint8_t vbus;
 			// This is where things get ugly
 			// For the DHT11 data bytes:
 			//   0: integer humidity %
@@ -486,8 +479,58 @@ int main(void)
 				kelvinTemp -= temp;
 			else
 				kelvinTemp += temp;
-			
 #endif
+
+			count++;
+			if(count >= num_avg)
+			{
+				th_state = TH_STATE_SEND_PACKET;
+				count = 0;
+			} else {
+				th_state = TH_STATE_TRIGGER;
+			}
+		}
+		else if(th_state == TH_STATE_SEND_PACKET)
+		{
+			tempA /= num_avg;
+			tempB /= num_avg;
+			tempC /= num_avg;
+			tempD /= num_avg;
+			tempInt /= num_avg;
+			vdd /= num_avg;
+
+			mrbus_tx_buffer[MRBUS_PKT_SRC] = mrbus_dev_addr;
+			mrbus_tx_buffer[MRBUS_PKT_DEST] = 0xFF;
+			mrbus_tx_buffer[MRBUS_PKT_LEN] = 11;
+			mrbus_tx_buffer[5] = 'S';
+			mrbus_tx_buffer[6] = 0;  // Status byte.  Lower three bits are sensor type, 000 = DHT11/DHT22/RHT03
+			mrbus_tx_buffer[7] = (kelvinTemp >> 8);
+			mrbus_tx_buffer[8] = kelvinTemp & 0xff;
+			mrbus_tx_buffer[9] = relHumidity & 0xff;
+			mrbus_tx_buffer[10] = 127;
+			mrbus_state |= MRBUS_TX_PKT_READY;
+
+			tempA = 0;
+			tempB = 0;
+			tempC = 0;
+			tempD = 0;
+			tempInt = 0;
+			vdd = 0;
+
+			mrbus_state |= MRBUS_TX_PKT_READY;
+			rts_state = RTS_STATE_IDLE;
+			ADCSRA &= ~(_BV(ADEN) | _BV(ADSC));  // Disable ADC
+		}
+
+
+		
+		
+		// dht11_read_complete will go to 1 on a successful conversion
+		// 0 means not done, 2 means an error occurred, and 3 means idle
+		
+		if (1 == dht11_read_complete)
+		{
+
 
 			// Get bus voltage
 			//temp = ((uint16_t)ADCH<<8) + (uint16_t)ADCL;
@@ -498,17 +541,7 @@ int main(void)
 
 //1024 = AVCC * 6 * 10
 
-			mrbus_tx_buffer[MRBUS_PKT_SRC] = mrbus_dev_addr;
-			mrbus_tx_buffer[MRBUS_PKT_DEST] = 0xFF;
-			mrbus_tx_buffer[MRBUS_PKT_LEN] = 11;
-			mrbus_tx_buffer[5] = 'S';
-			mrbus_tx_buffer[6] = 0;  // Status byte.  Lower three bits are sensor type, 000 = DHT11/DHT22/RHT03
-			mrbus_tx_buffer[7] = (kelvinTemp >> 8);
-			mrbus_tx_buffer[8] = kelvinTemp & 0xff;
-			mrbus_tx_buffer[9] = relHumidity & 0xff;
-            mrbus_tx_buffer[10] = ADCL;
-            						
-			mrbus_state |= MRBUS_TX_PKT_READY;
+
 			dht11_read_complete = 3;			
 		}
 // END of DHT11 / DHT22 / RHT03 read section
