@@ -20,6 +20,7 @@ LICENSE:
 *************************************************************************/
 
 #include <stdlib.h>
+#include <string.h>
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <avr/eeprom.h>
@@ -47,15 +48,16 @@ extern uint8_t mrbus_rx_buffer[MRBUS_BUFFER_SIZE];
 extern uint8_t mrbus_tx_buffer[MRBUS_BUFFER_SIZE];
 extern uint8_t mrbus_state;
 
-uint8_t mrbus_dev_addr = 0;
-uint8_t th_state = TH_STATE_IDLE;
-
 #define TH_STATE_IDLE          0x00
 #define TH_STATE_TRIGGER       0x10 
 #define TH_STATE_WAIT          0x20
 #define TH_STATE_READ          0x30
 #define TH_STATE_SEND_PACKET   0x40
 
+uint8_t mrbus_dev_addr = 0;
+uint8_t th_state = TH_STATE_IDLE;
+uint8_t num_avg = 1;
+uint16_t pkt_period = 20;
 
 // ******** Start 100 Hz Timer, 0.16% error version (Timer 0)
 // If you can live with a slightly less accurate timer, this one only uses Timer 0, leaving Timer 1 open
@@ -92,8 +94,6 @@ ISR(TIMER0_COMPA_vect)
 }
 
 // End of 100Hz timer
-
-#endif
 
 void PktHandler(void)
 {
@@ -191,23 +191,6 @@ PktIgnore:
 	return;	
 }
 
-void init(void)
-{
-	// FIXME:  Do any initialization you need to do here.
-	DDRC &= ~_BV(PC3);
-	PORTC &= ~(_BV(PC3) | _BV(PC5));
-	DDRC |= _BV(PC5);
-	// Initialize MRBus address from EEPROM address 1
-	mrbus_dev_addr = eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_ADDR);
-	
-	// Setup ADC
-	ADMUX  = 0x47;  // AVCC reference; ADC7 input
-	ADCSRA = 0x87;  // 128 prescaler
-	ADCSRB = 0x00;
-	DIDR0  = 0x00;  // No digitals were harmed in the making of this ADC
-	
-}
-
 volatile uint16_t busVoltage=0;
 volatile uint8_t busVoltageCount=0;
 
@@ -302,9 +285,9 @@ void dht11_start_conversion()
 	initializeDHT11Timer();
 
 	dht11_bitnum=0;
-	memset(dht11_data, 0, sizeof(dht11_data));
+	memset((void*)dht11_data, 0, sizeof(dht11_data));
 	dht11_read_complete=0;
-
+	
 	DDRC |= _BV(PC3);	
 	while (countdown-- != 0)
 	{
@@ -374,7 +357,7 @@ int main(void)
 	uint16_t kelvinTemp = 4370; // Expressed in 1/16ths K, base of 273.15 K
 	uint16_t relHumidity = 0; // Expressed in 1/10ths % RH
 	uint8_t vbus=0;
-
+	uint8_t count=0;
 #if defined DHT11 || defined DHT22
 	uint8_t dht11_powerup_lockout = 1;
 #else
@@ -440,7 +423,7 @@ int main(void)
 				th_state = TH_STATE_READ;
 
 		}
-		else if (TH_STATE_READ = th_state)
+		else if (TH_STATE_READ == th_state)
 		{
 			uint16_t temp;
 			// This is where things get ugly
@@ -492,12 +475,8 @@ int main(void)
 		}
 		else if(th_state == TH_STATE_SEND_PACKET)
 		{
-			tempA /= num_avg;
-			tempB /= num_avg;
-			tempC /= num_avg;
-			tempD /= num_avg;
-			tempInt /= num_avg;
-			vdd /= num_avg;
+			// Turn the ADC back off
+			ADCSRA &= ~(_BV(ADEN) | _BV(ADSC));
 
 			mrbus_tx_buffer[MRBUS_PKT_SRC] = mrbus_dev_addr;
 			mrbus_tx_buffer[MRBUS_PKT_DEST] = 0xFF;
@@ -510,43 +489,9 @@ int main(void)
 			mrbus_tx_buffer[10] = 127;
 			mrbus_state |= MRBUS_TX_PKT_READY;
 
-			tempA = 0;
-			tempB = 0;
-			tempC = 0;
-			tempD = 0;
-			tempInt = 0;
-			vdd = 0;
-
-			mrbus_state |= MRBUS_TX_PKT_READY;
-			rts_state = RTS_STATE_IDLE;
+			th_state = TH_STATE_IDLE;
 			ADCSRA &= ~(_BV(ADEN) | _BV(ADSC));  // Disable ADC
 		}
-
-
-		
-		
-		// dht11_read_complete will go to 1 on a successful conversion
-		// 0 means not done, 2 means an error occurred, and 3 means idle
-		
-		if (1 == dht11_read_complete)
-		{
-
-
-			// Get bus voltage
-			//temp = ((uint16_t)ADCH<<8) + (uint16_t)ADCL;
-
-			// Voltage on the pin will be either be 1/6 bus voltage or 1:1 bat voltage
-			// Avcc will be either 5V or 3.3V
-
-
-//1024 = AVCC * 6 * 10
-
-
-			dht11_read_complete = 3;			
-		}
-// END of DHT11 / DHT22 / RHT03 read section
-#endif
-
 
 		// If we have a packet to be transmitted, try to send it here
 		while(mrbus_state & MRBUS_TX_PKT_READY)
