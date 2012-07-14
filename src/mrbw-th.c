@@ -512,7 +512,7 @@ int main(void)
 			temp *= 8;
 			temp /= 5;
 			
-			relHumdity /= 5;
+			relHumidity /= 5;
 			
 			if (dht11_data[2] & 0x80)
 				kelvinTemp -= temp;
