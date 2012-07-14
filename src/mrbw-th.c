@@ -54,6 +54,8 @@ extern uint8_t mrbus_state;
 #define TH_STATE_READ          0x30
 #define TH_STATE_SEND_PACKET   0x40
 
+#define TH_EE_NUM_AVG          0x10
+
 uint8_t mrbus_dev_addr = 0;
 uint8_t th_state = TH_STATE_IDLE;
 uint8_t num_avg = 1;
@@ -156,6 +158,20 @@ void PktHandler(void)
 		mrbus_tx_buffer[7] = mrbus_rx_buffer[7];
 		if (MRBUS_EE_DEVICE_ADDR == mrbus_rx_buffer[6])
 			mrbus_dev_addr = eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_ADDR);
+		else if ( (MRBUS_EE_DEVICE_UPDATE_L == mrbus_rx_buffer[6]) || (MRBUS_EE_DEVICE_UPDATE_H == mrbus_rx_buffer[6]) )
+		{
+		    pkt_period = ((eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_UPDATE_H) << 8) & 0xFF00) | (eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_UPDATE_L) & 0x00FF);
+#if defined DHT11 || defined DHT22
+			pkt_period = max(pkt_period, 20);
+#endif
+		}
+		else if (TH_EE_NUM_AVG == mrbus_rx_buffer[6])
+		{
+			num_avg = eeprom_read_byte((uint8_t*)TH_EE_NUM_AVG);			
+#if defined DHT11 || defined DHT22
+			num_avg = 1;
+#endif
+		}
 		mrbus_tx_buffer[MRBUS_PKT_SRC] = mrbus_dev_addr;
 		mrbus_state |= MRBUS_TX_PKT_READY;
 		goto PktIgnore;
@@ -196,11 +212,15 @@ volatile uint8_t busVoltageCount=0;
 
 ISR(ADC_vect)
 {
-	busVoltage = ADCL + (ADCH << 8);
-	busVoltageCount++;
+	PORTC |= _BV(PC5);
+	busVoltage += ADC;
+	if (++busVoltageCount >=8)
+	{
+		// Disable ADC
+		ADCSRA &= ~(_BV(ADEN) | _BV(ADIE));	
+	}
+	PORTC &= ~_BV(PC5);
 }
-
-
 
 #if defined DHT11 || defined DHT22
 
@@ -352,11 +372,39 @@ void dht11_start_conversion()
 #endif
 
 
+void init(void)
+{
+	DDRC &= ~_BV(PC3);
+	PORTC &= ~(_BV(PC3) | _BV(PC5));
+	DDRC |= _BV(PC5);
+	// Initialize MRBus address from EEPROM address 1
+	mrbus_dev_addr = eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_ADDR);
+
+	// Initialize MRBus packet update interval from EEPROM
+	pkt_period = ((eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_UPDATE_H) << 8) & 0xFF00) | (eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_UPDATE_L) & 0x00FF);
+#if defined DHT11 || defined DHT22
+	pkt_period = max(pkt_period, 20);
+#endif
+
+	// Initialize averaging value from EEPROM
+#if defined DHT11 || defined DHT22
+	num_avg = 1;
+#else
+	num_avg = eeprom_read_byte((uint8_t*)TH_EE_NUM_AVG);
+#endif
+	
+	// Setup ADC
+	ADMUX  = 0x47;  // AVCC reference; ADC7 input
+	ADCSRA = 0x36;  // 128 prescaler
+	ADCSRB = 0x00;
+	DIDR0  = 0x00;  // No digitals were harmed in the making of this ADC
+}
+
+
 int main(void)
 {
 	uint16_t kelvinTemp = 4370; // Expressed in 1/16ths K, base of 273.15 K
 	uint16_t relHumidity = 0; // Expressed in 1/10ths % RH
-	uint8_t vbus=0;
 	uint8_t count=0;
 #if defined DHT11 || defined DHT22
 	uint8_t dht11_powerup_lockout = 1;
@@ -407,7 +455,9 @@ int main(void)
 			dht11_start_conversion();
 #endif
 			// Trigger an ADC conversion
-			ADCSRA |= _BV(ADEN) | _BV(ADSC);
+			busVoltage = 0;
+			busVoltageCount = 0;
+			ADCSRA |= _BV(ADEN) | _BV(ADSC) | _BV(ADIE) | _BV(ADIF);
 			th_state = TH_STATE_WAIT;
 		}
 		else if (TH_STATE_WAIT == th_state)
@@ -419,13 +469,19 @@ int main(void)
 				conversionComplete = 1;
 #endif
 
-			if ( conversionComplete && !(ADCSRA & _BV(ADSC)) )
+			if (conversionComplete && !(ADCSRA & _BV(ADEN)) )
+//			if (conversionComplete)
 				th_state = TH_STATE_READ;
 
 		}
 		else if (TH_STATE_READ == th_state)
 		{
 			uint16_t temp;
+
+			kelvinTemp = 4370; // Expressed in 1/16ths K, base of 273.15 K
+			relHumidity = 0; // Expressed in 1/10ths % RH		
+
+
 			// This is where things get ugly
 			// For the DHT11 data bytes:
 			//   0: integer humidity %
@@ -463,6 +519,12 @@ int main(void)
 			else
 				kelvinTemp += temp;
 #endif
+			// Div by 8, as we use 8 samples
+			busVoltage = busVoltage >> 3;  
+			
+			//At this point, we're at (Vbus/6) / 5 * 1024
+			//So multiply by 300, divide by 1024, or multiply by 75 and divide by 256
+			busVoltage = ((uint32_t)busVoltage * 75) >> 8;
 
 			count++;
 			if(count >= num_avg)
@@ -475,9 +537,6 @@ int main(void)
 		}
 		else if(th_state == TH_STATE_SEND_PACKET)
 		{
-			// Turn the ADC back off
-			ADCSRA &= ~(_BV(ADEN) | _BV(ADSC));
-
 			mrbus_tx_buffer[MRBUS_PKT_SRC] = mrbus_dev_addr;
 			mrbus_tx_buffer[MRBUS_PKT_DEST] = 0xFF;
 			mrbus_tx_buffer[MRBUS_PKT_LEN] = 11;
@@ -486,11 +545,10 @@ int main(void)
 			mrbus_tx_buffer[7] = (kelvinTemp >> 8);
 			mrbus_tx_buffer[8] = kelvinTemp & 0xff;
 			mrbus_tx_buffer[9] = relHumidity & 0xff;
-			mrbus_tx_buffer[10] = 127;
+			mrbus_tx_buffer[10] = (uint8_t)busVoltage;
 			mrbus_state |= MRBUS_TX_PKT_READY;
 
 			th_state = TH_STATE_IDLE;
-			ADCSRA &= ~(_BV(ADEN) | _BV(ADSC));  // Disable ADC
 		}
 
 		// If we have a packet to be transmitted, try to send it here
