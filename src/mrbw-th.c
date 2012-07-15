@@ -212,14 +212,12 @@ volatile uint8_t busVoltageCount=0;
 
 ISR(ADC_vect)
 {
-	PORTC |= _BV(PC5);
 	busVoltage += ADC;
 	if (++busVoltageCount >=8)
 	{
 		// Disable ADC
 		ADCSRA &= ~(_BV(ADEN) | _BV(ADIE));	
 	}
-	PORTC &= ~_BV(PC5);
 }
 
 #if defined DHT11 || defined DHT22
@@ -240,6 +238,7 @@ void initializeDHT11Timer()
 ISR(PCINT1_vect)
 {
 	// This is used by the DHT11 code to read asynchronously to the main loop
+	PORTC |= _BV(PC5);
 	if(!(PINC & _BV(PC3)))
 	{
 		uint8_t timerval = TCNT2;
@@ -250,7 +249,7 @@ ISR(PCINT1_vect)
 		// A logic one will be between 83 and 110
 		
 		TCNT2 = 0;
-		if (timerval > 83 && timerval < 110)
+		if (timerval > 70 && timerval < 120)
 		{
 			// It's a one, put one in the correct place
 			dht11_data[dht11_bitnum / 8] |= 1<<(7-(dht11_bitnum % 8));
@@ -265,6 +264,7 @@ ISR(PCINT1_vect)
 		TCNT2 = 0;
 		TIMSK2 |= _BV(TOIE2);
 	}
+	PORTC &= ~_BV(PC5);
 
 	if(dht11_bitnum >= 40)
 	{
@@ -333,7 +333,7 @@ void dht11_start_conversion()
 	// Failure, the DHT11 didn't respond, return
 	if (0 != dht11_read_complete)
 	{
-		dht11_read_complete = 2;
+		dht11_read_complete = 0x42;
 		return;
 	}
 
@@ -346,19 +346,20 @@ void dht11_start_conversion()
 	// Failure, the DHT11 didn't respond, return
 	if (0 != dht11_bitnum)
 	{
-		dht11_read_complete = 2;
+		dht11_read_complete = 0x62;
 		return;
 	}
 
 	// 20-40uS high after AVR releases the line
 	// Wait for the low for up to 186uS
+	TCNT2 = 0;
 	while ((PINC & _BV(PC3)) && 0 == dht11_read_complete);
 
 	TCNT2 = 0;
 	// Failure, the DHT11 didn't respond, return
 	if (0 != dht11_read_complete)
 	{
-		dht11_read_complete = 2;
+		dht11_read_complete = 0x82;
 		return;
 	}
 
@@ -546,6 +547,13 @@ int main(void)
 			mrbus_tx_buffer[8] = kelvinTemp & 0xff;
 			mrbus_tx_buffer[9] = relHumidity & 0xff;
 			mrbus_tx_buffer[10] = (uint8_t)busVoltage;
+			
+//			mrbus_tx_buffer[6] = dht11_data[0];  // Status byte.  Lower three bits are sensor type, 000 = DHT11/DHT22/RHT03
+//			mrbus_tx_buffer[7] = dht11_data[1];
+//			mrbus_tx_buffer[8] = dht11_data[2];
+//			mrbus_tx_buffer[9] = dht11_data[3];
+//			mrbus_tx_buffer[10] = dht11_read_complete;
+
 			mrbus_state |= MRBUS_TX_PKT_READY;
 
 			th_state = TH_STATE_IDLE;
