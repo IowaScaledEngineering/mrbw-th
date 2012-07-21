@@ -82,7 +82,8 @@ void initialize100HzTimer(void)
 {
 	// Set up timer 1 for 100Hz interrupts
 	TCNT0 = 0;
-	OCR0A = 0xC2;
+	//OCR0A = 0xC2;
+	OCR0A = 0x6C; // Appropriate for 11.0592 MHz
 	ticks = 0;
 	decisecs = 0;
 	TCCR0A = _BV(WGM01);
@@ -327,10 +328,8 @@ ISR(TIMER2_OVF_vect)
 {
 	// We overflowed, meaning the DHT11 stopped responding correctly
 	dht11_read_complete = 2;
-
 	// Shut down Timer 2
 	TIMSK2 &= ~_BV(TOIE2);
-	PORTC &= ~_BV(PC5);	
 	// Shut down the PCINT11 interrupt
 	PCIFR |= _BV(PCIF1);
 	PCICR &= ~_BV(PCIE1);
@@ -422,15 +421,12 @@ ISR(WDT_vect)
 }
 
 
-void system_sleep(uint16_t sleep_decisecs)
+uint16_t system_sleep(uint16_t sleep_decisecs)
 {
 	uint16_t slept = 0;
-	set_sleep_mode(SLEEP_MODE_PWR_DOWN);      // set the type of sleep mode to use
-	wdt_tripped = 0;
 
 	// Sleep the XBee
 	PORTD |= _BV(PD7);
-	power_all_disable();
 
 	while(slept < sleep_decisecs)
 	{
@@ -477,6 +473,7 @@ void system_sleep(uint16_t sleep_decisecs)
 		// Procedure to reset watchdog and set it into interrupt mode only
 
 		cli();
+		set_sleep_mode(SLEEP_MODE_PWR_DOWN);      // set the type of sleep mode to use
 		sleep_enable();                           // enable sleep mode
 
 		wdt_reset();
@@ -485,37 +482,34 @@ void system_sleep(uint16_t sleep_decisecs)
 		WDTCSR = wdtcsr_bits;
 
         sei();
-		sleep_cpu();
-		sleep_disable();
 
 		wdt_tripped = 0;
 		// Wrap this in a loop, so we go back to sleep unless the WDT woke us up
 		while (0 == wdt_tripped)
-		{
-//			sleep_bod_disable();
         	sleep_cpu();
-		}
 
 		wdt_reset();
 		WDTCSR |= _BV(WDIE); // Restore WDT interrupt mode
 
 		slept += planned_sleep;
-
-
 	}
 
-	decisecs += slept;
-
+#ifdef ENABLE_WATCHDOG
+	// If you don't want the watchdog to do system reset, remove this chunk of code
+	wdt_reset();
+	MCUSR &= ~(_BV(WDRF));
+	WDTCSR |= _BV(WDE) | _BV(WDCE);
+	WDTCSR = _BV(WDE) | _BV(WDP2) | _BV(WDP1); // Set the WDT to system reset and 1s timeout
+	wdt_reset();
+#else
 	wdt_reset();
 	wdt_disable();
-
-	power_all_enable();
+#endif
 
 	// Unsleep the XBee
 	PORTD &= ~_BV(PD7);
-
 	sleep_disable();
-
+	return(slept);
 }
 
 #endif
@@ -525,18 +519,27 @@ void init(void)
 {
 	// Kill watchdog
     MCUSR = 0;
-    wdt_disable();
+#ifdef ENABLE_WATCHDOG
+	// If you don't want the watchdog to do system reset, remove this chunk of code
+	wdt_reset();
+	WDTCSR |= _BV(WDE) | _BV(WDCE);
+	WDTCSR = _BV(WDE) | _BV(WDP2) | _BV(WDP1); // Set the WDT to system reset and 1s timeout
+	wdt_reset();
+#else
+	wdt_reset();
+	wdt_disable();
+#endif
 
-	DDRD = _BV(PD7) | _BV(PD2) | _BV(PD1);
+	DDRD = _BV(PD7);
 	PORTD = 0x7F;
 
 	DDRB = 0;
 	PORTB = 0xFF;
 
-	DDRC = 0x0;	
+	DDRC = 0;	
 	PORTC = 0xFF;
 
-
+	ACSR = _BV(ACD);
 #ifdef TMP275
 	i2c_master_init();
 #endif
@@ -559,7 +562,7 @@ void init(void)
 	
 	// Setup ADC
 	ADMUX  = 0x47;  // AVCC reference; ADC7 input
-	ADCSRA = 0x36;  // 128 prescaler
+	ADCSRA = _BV(ADATE) | _BV(ADIF) | _BV(ADPS2) | _BV(ADPS1); // 128 prescaler
 	ADCSRB = 0x00;
 	DIDR0  = 0x00;  // No digitals were harmed in the making of this ADC
 }
@@ -590,6 +593,7 @@ int main(void)
 
 	while (1)
 	{
+		wdt_reset();
 #ifdef MRBEE
 		mrbeePoll();
 #endif
@@ -685,15 +689,23 @@ int main(void)
 			else
 				kelvinTemp += temp;
 #elif defined TMP275
-			kelvinTemp += tmp275_read_value();
+			temp = tmp275_read_value();
+			// Sign extend the 12 bit result
+			if (temp & 0x0800)
+				temp |= 0xF000;
+			kelvinTemp += temp;
 #endif
 			// Div by 8, as we use 8 samples
 			busVoltage = busVoltage >> 3;  
-			
+
+#ifdef LOWPOWER
+			busVoltage = ((uint32_t)busVoltage * 33) >> 10;
+
+#else			
 			//At this point, we're at (Vbus/6) / 5 * 1024
 			//So multiply by 300, divide by 1024, or multiply by 75 and divide by 256
 			busVoltage = ((uint32_t)busVoltage * 75) >> 8;
-
+#endif
 			count++;
 			if(count >= num_avg)
 			{
@@ -729,15 +741,24 @@ int main(void)
 		if (TH_STATE_XMIT_WAIT == th_state 
 			&& !(mrbus_state & (MRBUS_TX_BUF_ACTIVE | MRBUS_TX_PKT_READY)))
 		{
-			_delay_ms(250); // Give the XBEE time to get rid of its data
-			system_sleep(pkt_period);
+			uint8_t i=0;
+			// FIXME: this is crap
+			// Need to actually see when we're done sending out of the XBEE
+			// Also, do this as a loop, in case we're on a short watchdog
+			for (i=0; i<25; i++)
+			{
+				wdt_reset();							
+				_delay_ms(10);
+			}
+
+			decisecs += system_sleep(pkt_period);
 			th_state = TH_STATE_WAKE;
 		}
 		
 		if (TH_STATE_WAKE == th_state)
 		{
 			// FIXME:  Do wakeup stuff
-			th_state = TH_STATE_TRIGGER;		
+			th_state = TH_STATE_IDLE;		
 		}
 		
 #endif
@@ -745,8 +766,6 @@ int main(void)
 		// If we have a packet to be transmitted, try to send it here
 		while(mrbus_state & MRBUS_TX_PKT_READY)
 		{
-			uint8_t bus_countdown;
-
 			// Even while we're sitting here trying to transmit, keep handling
 			// any packets we're receiving so that we keep up with the current state of the
 			// bus.  Obviously things that request a response cannot go, since the transmit
@@ -771,13 +790,15 @@ int main(void)
 			// Because MRBus has a minimum packet size of 6 bytes @ 57.6kbps,
 			// need to check roughly every millisecond to see if we have a new packet
 			// so that we don't miss things we're receiving while waiting to transmit
-			bus_countdown = 20;
-			while (bus_countdown-- > 0 && MRBUS_ACTIVITY_RX_COMPLETE != mrbus_activity)
 			{
-				//clrwdt();
-				_delay_ms(1);
-				if (mrbus_state & MRBUS_RX_PKT_READY) 
-					PktHandler();
+				uint8_t bus_countdown = 20;
+				while (bus_countdown-- > 0 && MRBUS_ACTIVITY_RX_COMPLETE != mrbus_activity)
+				{
+					//clrwdt();
+					_delay_ms(1);
+					if (mrbus_state & MRBUS_RX_PKT_READY) 
+						PktHandler();
+				}
 			}
 #endif
 		}

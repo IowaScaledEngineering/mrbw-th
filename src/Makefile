@@ -66,7 +66,7 @@ BASE_NAME = mrbw-th
 DEVICE  = atmega48
 F_CPU   = 11059200  # Hz
 FUSE_L  = 0xD7
-FUSE_H  = 0xD5
+FUSE_H  = 0xD7
 FUSE_E  = 0x00
 
 # Define the sensor type used on the board.
@@ -83,7 +83,7 @@ SENSOR=TMP275
 #INCS = ../../mrbus/src/mrbus.h ../../mrbus/src/mrbus-avr.h
 
 # MRBee
-DEFINES = -DMRBEE -DMRBEE_BAUD=115200 -DLOWPOWER
+DEFINES = -DMRBEE -DMRBEE_BAUD=115200 -DLOWPOWER -DUSE_WATCHDOG
 SRCS = $(BASE_NAME).c ../../mrbus/src/mrbus-crc.c ../../mrbee/src/mrbee.c ../../mrbee/src/xbee.c ../../libs/avr-i2c/avr-i2c-master.c
 INCS = ../../mrbus/src/mrbus.h ../../mrbee/src/mrbee.h ../../mrbee/src/xbee.h ../../libs/avr-i2c/avr-i2c-master.h
 
