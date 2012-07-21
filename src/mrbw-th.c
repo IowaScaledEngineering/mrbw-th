@@ -432,7 +432,7 @@ void system_sleep(uint16_t sleep_decisecs)
 	PORTD |= _BV(PD7);
 	power_all_disable();
 
-	while(slept < decisec)
+	while(slept < sleep_decisecs)
 	{
 		uint16_t remaining_sleep = sleep_decisecs - slept;
 		uint8_t planned_sleep = 80;
