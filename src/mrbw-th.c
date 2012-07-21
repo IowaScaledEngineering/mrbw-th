@@ -422,7 +422,7 @@ ISR(WDT_vect)
 }
 
 
-void system_sleep(uint16_t decisec)
+void system_sleep(uint16_t sleep_decisecs)
 {
 	uint16_t slept = 0;
 	set_sleep_mode(SLEEP_MODE_PWR_DOWN);      // set the type of sleep mode to use
@@ -434,7 +434,7 @@ void system_sleep(uint16_t decisec)
 
 	while(slept < decisec)
 	{
-		uint16_t remaining_sleep = decisec - slept;
+		uint16_t remaining_sleep = sleep_decisecs - slept;
 		uint8_t planned_sleep = 80;
 		uint8_t wdtcsr_bits = _BV(WDIF) | _BV(WDIE);
 
@@ -503,6 +503,8 @@ void system_sleep(uint16_t decisec)
 
 
 	}
+
+	decisecs += slept;
 
 	wdt_reset();
 	wdt_disable();
@@ -634,7 +636,6 @@ int main(void)
 #elif defined TMP275
 			conversionComplete = 1;
 #endif
-
 			if (conversionComplete && !(ADCSRA & _BV(ADEN)) )
 				th_state = TH_STATE_READ;
 
@@ -728,7 +729,7 @@ int main(void)
 		if (TH_STATE_XMIT_WAIT == th_state 
 			&& !(mrbus_state & (MRBUS_TX_BUF_ACTIVE | MRBUS_TX_PKT_READY)))
 		{
-			_delay_ms(250);
+			_delay_ms(250); // Give the XBEE time to get rid of its data
 			system_sleep(pkt_period);
 			th_state = TH_STATE_WAKE;
 		}
