@@ -22,6 +22,9 @@ LICENSE:
 #include <stdlib.h>
 #include <string.h>
 #include <avr/io.h>
+#include <avr/sleep.h>
+#include <avr/wdt.h>
+#include <avr/power.h>
 #include <avr/interrupt.h>
 #include <avr/eeprom.h>
 #include <util/delay.h>
@@ -32,8 +35,6 @@ LICENSE:
 #define mrbus_rx_buffer mrbee_rx_buffer
 #define mrbus_tx_buffer mrbee_tx_buffer
 #define mrbus_state mrbee_state
-#define MRBUS_TX_PKT_READY MRBEE_TX_PKT_READY
-#define MRBUS_RX_PKT_READY MRBEE_RX_PKT_READY
 #define mrbux_rx_buffer mrbee_rx_buffer
 #define mrbus_tx_buffer mrbee_tx_buffer
 #define mrbus_state mrbee_state
@@ -53,6 +54,9 @@ extern uint8_t mrbus_state;
 #define TH_STATE_WAIT          0x20
 #define TH_STATE_READ          0x30
 #define TH_STATE_SEND_PACKET   0x40
+#define TH_STATE_XMIT_WAIT     0x50
+#define TH_STATE_WAKE          0x60
+
 
 #define TH_EE_NUM_AVG          0x10
 
@@ -220,6 +224,44 @@ ISR(ADC_vect)
 	}
 }
 
+#ifdef TMP275
+
+#include "avr-i2c-master.h"
+
+#define TMP275_PTR_TEMP_REG    0x00
+#define TMP275_PTR_CONFIG_REG  0x01
+#define TMP275_PTR_TEMP_L_REG  0x10
+#define TMP275_PTR_TEMP_H_REG  0x11
+
+void tmp275_start_conversion()
+{
+    uint8_t msgBuf[4];
+    msgBuf[0] = 0x9E;
+    msgBuf[1] = 0x01;
+    msgBuf[2] = 0xE1;
+    msgBuf[3] = 0xE1;
+    i2c_transmit(msgBuf, 4, 0);
+    while(i2c_busy());
+
+}
+
+uint16_t tmp275_read_value()
+{
+    uint8_t msgBuf[4];
+    msgBuf[0] = 0x9E;
+    msgBuf[1] = 0x00;
+    i2c_transmit(msgBuf, 2, 1);
+	while(i2c_busy());
+    msgBuf[0] = 0x9F;
+    i2c_transmit(msgBuf, 3, 0);
+	i2c_receive(msgBuf, 3);
+	
+	return((((uint16_t)msgBuf[1])<<4) | (0x0F & (msgBuf[2]>>4)));
+	
+}
+
+#endif
+
 #if defined DHT11 || defined DHT22
 
 volatile uint8_t dht11_bitnum=0;
@@ -238,7 +280,6 @@ void initializeDHT11Timer()
 ISR(PCINT1_vect)
 {
 	// This is used by the DHT11 code to read asynchronously to the main loop
-	PORTC |= _BV(PC5);
 	if(!(PINC & _BV(PC3)))
 	{
 		uint8_t timerval = TCNT2;
@@ -264,7 +305,6 @@ ISR(PCINT1_vect)
 		TCNT2 = 0;
 		TIMSK2 |= _BV(TOIE2);
 	}
-	PORTC &= ~_BV(PC5);
 
 	if(dht11_bitnum >= 40)
 	{
@@ -372,12 +412,133 @@ void dht11_start_conversion()
 
 #endif
 
+#ifdef LOWPOWER
+
+volatile uint8_t wdt_tripped=0;
+
+ISR(WDT_vect) 
+{
+	wdt_tripped=1;  // set global volatile variable
+}
+
+
+void system_sleep(uint16_t decisec)
+{
+	uint16_t slept = 0;
+	set_sleep_mode(SLEEP_MODE_PWR_DOWN);      // set the type of sleep mode to use
+	wdt_tripped = 0;
+
+	// Sleep the XBee
+	PORTD |= _BV(PD7);
+	power_all_disable();
+
+	while(slept < decisec)
+	{
+		uint16_t remaining_sleep = decisec - slept;
+		uint8_t planned_sleep = 80;
+		uint8_t wdtcsr_bits = _BV(WDIF) | _BV(WDIE);
+
+		if (remaining_sleep == 1)
+		{
+			wdtcsr_bits |= _BV(WDP1) | _BV(WDP0);
+			planned_sleep = 1;
+		}
+		else if (remaining_sleep <= 3)
+		{
+			wdtcsr_bits |= _BV(WDP2);
+			planned_sleep = 3;
+		}
+		else if (remaining_sleep <= 5)
+		{
+			wdtcsr_bits |= _BV(WDP2) | _BV(WDP0);
+			planned_sleep = 5;
+		}
+		else if (remaining_sleep <= 10)
+		{
+			wdtcsr_bits |= _BV(WDP2) | _BV(WDP1);
+			planned_sleep = 10;
+		}
+		else if (remaining_sleep <= 20)
+		{
+			wdtcsr_bits |= _BV(WDP2) | _BV(WDP1) | _BV(WDP0);
+			planned_sleep = 20;
+		}
+		else if (remaining_sleep <= 40)
+		{
+			wdtcsr_bits |= _BV(WDP3);
+			planned_sleep = 40;
+		}
+		else
+		{
+			wdtcsr_bits |= _BV(WDP3) | _BV(WDP0);
+			planned_sleep = 80;
+		}
+
+		// Procedure to reset watchdog and set it into interrupt mode only
+
+		cli();
+		sleep_enable();                           // enable sleep mode
+
+		wdt_reset();
+		MCUSR &= ~(_BV(WDRF));
+		WDTCSR |= _BV(WDE) | _BV(WDCE);
+		WDTCSR = wdtcsr_bits;
+
+        sei();
+		sleep_cpu();
+		sleep_disable();
+
+		wdt_tripped = 0;
+		// Wrap this in a loop, so we go back to sleep unless the WDT woke us up
+		while (0 == wdt_tripped)
+		{
+//			sleep_bod_disable();
+        	sleep_cpu();
+		}
+
+		wdt_reset();
+		WDTCSR |= _BV(WDIE); // Restore WDT interrupt mode
+
+		slept += planned_sleep;
+
+
+	}
+
+	wdt_reset();
+	wdt_disable();
+
+	power_all_enable();
+
+	// Unsleep the XBee
+	PORTD &= ~_BV(PD7);
+
+	sleep_disable();
+
+}
+
+#endif
+
 
 void init(void)
 {
-	DDRC &= ~_BV(PC3);
-	PORTC &= ~(_BV(PC3) | _BV(PC5));
-	DDRC |= _BV(PC5);
+	// Kill watchdog
+    MCUSR = 0;
+    wdt_disable();
+
+	DDRD = _BV(PD7) | _BV(PD2) | _BV(PD1);
+	PORTD = 0x7F;
+
+	DDRB = 0;
+	PORTB = 0xFF;
+
+	DDRC = 0x0;	
+	PORTC = 0xFF;
+
+
+#ifdef TMP275
+	i2c_master_init();
+#endif
+	
 	// Initialize MRBus address from EEPROM address 1
 	mrbus_dev_addr = eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_ADDR);
 
@@ -454,6 +615,8 @@ int main(void)
 		{
 #if defined DHT11 || defined DHT22
 			dht11_start_conversion();
+#elif defined TMP275
+			tmp275_start_conversion();
 #endif
 			// Trigger an ADC conversion
 			busVoltage = 0;
@@ -468,10 +631,11 @@ int main(void)
 #if defined DHT11 || defined DHT22
 			if (dht11_read_complete)
 				conversionComplete = 1;
+#elif defined TMP275
+			conversionComplete = 1;
 #endif
 
 			if (conversionComplete && !(ADCSRA & _BV(ADEN)) )
-//			if (conversionComplete)
 				th_state = TH_STATE_READ;
 
 		}
@@ -519,6 +683,8 @@ int main(void)
 				kelvinTemp -= temp;
 			else
 				kelvinTemp += temp;
+#elif defined TMP275
+			kelvinTemp += tmp275_read_value();
 #endif
 			// Div by 8, as we use 8 samples
 			busVoltage = busVoltage >> 3;  
@@ -547,17 +713,33 @@ int main(void)
 			mrbus_tx_buffer[8] = kelvinTemp & 0xff;
 			mrbus_tx_buffer[9] = relHumidity & 0xff;
 			mrbus_tx_buffer[10] = (uint8_t)busVoltage;
-			
-//			mrbus_tx_buffer[6] = dht11_data[0];  // Status byte.  Lower three bits are sensor type, 000 = DHT11/DHT22/RHT03
-//			mrbus_tx_buffer[7] = dht11_data[1];
-//			mrbus_tx_buffer[8] = dht11_data[2];
-//			mrbus_tx_buffer[9] = dht11_data[3];
-//			mrbus_tx_buffer[10] = dht11_read_complete;
 
 			mrbus_state |= MRBUS_TX_PKT_READY;
 
+#ifdef LOWPOWER
+			th_state = TH_STATE_XMIT_WAIT;
+#else
 			th_state = TH_STATE_IDLE;
+#endif
 		}
+
+
+#ifdef LOWPOWER
+		if (TH_STATE_XMIT_WAIT == th_state 
+			&& !(mrbus_state & (MRBUS_TX_BUF_ACTIVE | MRBUS_TX_PKT_READY)))
+		{
+			_delay_ms(250);
+			system_sleep(pkt_period);
+			th_state = TH_STATE_WAKE;
+		}
+		
+		if (TH_STATE_WAKE == th_state)
+		{
+			// FIXME:  Do wakeup stuff
+			th_state = TH_STATE_TRIGGER;		
+		}
+		
+#endif
 
 		// If we have a packet to be transmitted, try to send it here
 		while(mrbus_state & MRBUS_TX_PKT_READY)
