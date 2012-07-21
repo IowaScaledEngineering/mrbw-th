@@ -65,43 +65,6 @@ uint8_t th_state = TH_STATE_IDLE;
 uint8_t num_avg = 1;
 uint16_t pkt_period = 20;
 
-// ******** Start 100 Hz Timer, 0.16% error version (Timer 0)
-// If you can live with a slightly less accurate timer, this one only uses Timer 0, leaving Timer 1 open
-// for more advanced things that actually need a 16 bit timer/counter
-
-// Initialize a 100Hz timer for use in triggering events.
-// If you need the timer resources back, you can remove this, but I find it
-// rather handy in triggering things like periodic status transmissions.
-// If you do remove it, be sure to yank the interrupt handler and ticks/secs as well
-// and the call to this function in the main function
-
-volatile uint8_t ticks;
-volatile uint8_t decisecs;
-
-void initialize100HzTimer(void)
-{
-	// Set up timer 1 for 100Hz interrupts
-	TCNT0 = 0;
-	//OCR0A = 0xC2;
-	OCR0A = 0x6C; // Appropriate for 11.0592 MHz
-	ticks = 0;
-	decisecs = 0;
-	TCCR0A = _BV(WGM01);
-	TCCR0B = _BV(CS02) | _BV(CS00);
-	TIMSK0 |= _BV(OCIE0A);
-}
-
-ISR(TIMER0_COMPA_vect)
-{
-	if (++ticks >= 10)
-	{
-		ticks = 0;
-		decisecs++;
-	}
-}
-
-// End of 100Hz timer
-
 void PktHandler(void)
 {
 	uint16_t crc = 0;
@@ -173,7 +136,7 @@ void PktHandler(void)
 		else if (TH_EE_NUM_AVG == mrbus_rx_buffer[6])
 		{
 			num_avg = eeprom_read_byte((uint8_t*)TH_EE_NUM_AVG);			
-#if defined DHT11 || defined DHT22
+#if defined DHT11 || defined DHT22 || defined TMP275
 			num_avg = 1;
 #endif
 		}
@@ -234,6 +197,8 @@ ISR(ADC_vect)
 #define TMP275_PTR_TEMP_L_REG  0x10
 #define TMP275_PTR_TEMP_H_REG  0x11
 
+volatile uint8_t tmp275_read_countdown=0;
+
 void tmp275_start_conversion()
 {
     uint8_t msgBuf[4];
@@ -243,7 +208,8 @@ void tmp275_start_conversion()
     msgBuf[3] = 0xE1;
     i2c_transmit(msgBuf, 4, 0);
     while(i2c_busy());
-
+    
+    tmp275_read_countdown = 3;
 }
 
 uint16_t tmp275_read_value()
@@ -258,7 +224,6 @@ uint16_t tmp275_read_value()
 	i2c_receive(msgBuf, 3);
 	
 	return((((uint16_t)msgBuf[1])<<4) | (0x0F & (msgBuf[2]>>4)));
-	
 }
 
 #endif
@@ -475,7 +440,6 @@ uint16_t system_sleep(uint16_t sleep_decisecs)
 		cli();
 		set_sleep_mode(SLEEP_MODE_PWR_DOWN);      // set the type of sleep mode to use
 		sleep_enable();                           // enable sleep mode
-
 		wdt_reset();
 		MCUSR &= ~(_BV(WDRF));
 		WDTCSR |= _BV(WDE) | _BV(WDCE);
@@ -494,6 +458,8 @@ uint16_t system_sleep(uint16_t sleep_decisecs)
 		slept += planned_sleep;
 	}
 
+	sleep_disable();
+
 #ifdef ENABLE_WATCHDOG
 	// If you don't want the watchdog to do system reset, remove this chunk of code
 	wdt_reset();
@@ -508,11 +474,55 @@ uint16_t system_sleep(uint16_t sleep_decisecs)
 
 	// Unsleep the XBee
 	PORTD &= ~_BV(PD7);
-	sleep_disable();
+
 	return(slept);
 }
 
 #endif
+
+// ******** Start 100 Hz Timer, 0.16% error version (Timer 0)
+// If you can live with a slightly less accurate timer, this one only uses Timer 0, leaving Timer 1 open
+// for more advanced things that actually need a 16 bit timer/counter
+
+// Initialize a 100Hz timer for use in triggering events.
+// If you need the timer resources back, you can remove this, but I find it
+// rather handy in triggering things like periodic status transmissions.
+// If you do remove it, be sure to yank the interrupt handler and ticks/secs as well
+// and the call to this function in the main function
+
+volatile uint8_t ticks;
+volatile uint8_t decisecs;
+
+void initialize100HzTimer(void)
+{
+	// Set up timer 1 for 100Hz interrupts
+	TCNT0 = 0;
+	//OCR0A = 0xC2;
+	OCR0A = 0x6C; // Appropriate for 11.0592 MHz
+	ticks = 0;
+	decisecs = 0;
+	TCCR0A = _BV(WGM01);
+	TCCR0B = _BV(CS02) | _BV(CS00);
+	TIMSK0 |= _BV(OCIE0A);
+}
+
+ISR(TIMER0_COMPA_vect)
+{
+	if (++ticks >= 10)
+	{
+		ticks = 0;
+		decisecs++;
+
+#ifdef TMP275
+		if (tmp275_read_countdown)
+			tmp275_read_countdown--;
+#endif	
+
+	}
+}
+
+// End of 100Hz timer
+
 
 
 void init(void)
@@ -539,6 +549,9 @@ void init(void)
 	DDRC = 0;	
 	PORTC = 0xFF;
 
+	DDRC |= _BV(PC3);
+	PORTC &= ~_BV(PC3);
+
 	ACSR = _BV(ACD);
 #ifdef TMP275
 	i2c_master_init();
@@ -554,7 +567,7 @@ void init(void)
 #endif
 
 	// Initialize averaging value from EEPROM
-#if defined DHT11 || defined DHT22
+#if defined DHT11 || defined DHT22 || defined TMP275
 	num_avg = 1;
 #else
 	num_avg = eeprom_read_byte((uint8_t*)TH_EE_NUM_AVG);
@@ -597,6 +610,8 @@ int main(void)
 #ifdef MRBEE
 		mrbeePoll();
 #endif
+
+
 		// Handle any packets that may have come in
 		if (mrbus_state & MRBUS_RX_PKT_READY)
 			PktHandler();
@@ -609,15 +624,13 @@ int main(void)
 		if (dht11_powerup_lockout && decisecs > 12)
 			dht11_powerup_lockout = 0;
 
-		if (!dht11_powerup_lockout && decisecs >= pkt_period)
+		if ((TH_STATE_IDLE == th_state) && (decisecs >= pkt_period) && !dht11_powerup_lockout)
 		{
-			if(TH_STATE_IDLE == th_state)
-				th_state = TH_STATE_TRIGGER;
-
+			th_state = TH_STATE_TRIGGER;
+			count = 0;
 			decisecs = 0;
 		}
-
-		if (TH_STATE_TRIGGER == th_state)
+		else if (TH_STATE_TRIGGER == th_state)
 		{
 #if defined DHT11 || defined DHT22
 			dht11_start_conversion();
@@ -638,7 +651,10 @@ int main(void)
 			if (dht11_read_complete)
 				conversionComplete = 1;
 #elif defined TMP275
-			conversionComplete = 1;
+
+			if (0 == tmp275_read_countdown)
+				conversionComplete = 1;
+
 #endif
 			if (conversionComplete && !(ADCSRA & _BV(ADEN)) )
 				th_state = TH_STATE_READ;
@@ -706,8 +722,7 @@ int main(void)
 			//So multiply by 300, divide by 1024, or multiply by 75 and divide by 256
 			busVoltage = ((uint32_t)busVoltage * 75) >> 8;
 #endif
-			count++;
-			if(count >= num_avg)
+			if(++count >= num_avg)
 			{
 				th_state = TH_STATE_SEND_PACKET;
 				count = 0;
