@@ -57,7 +57,6 @@ extern uint8_t mrbus_state;
 #define TH_STATE_XMIT_WAIT     0x50
 #define TH_STATE_WAKE          0x60
 
-
 #define TH_EE_NUM_AVG          0x10
 
 uint8_t mrbus_dev_addr = 0;
@@ -306,13 +305,19 @@ void dht11_start_conversion()
 	// Get triggery
 	// Set DHT11 data wire to ground for 20ms
 
+#ifdef DHT11
+	countdown = 20;
+#elif defined DHT22
+	countdown = 4;
+#endif
+
 	initializeDHT11Timer();
 
 	dht11_bitnum=0;
 	memset((void*)dht11_data, 0, sizeof(dht11_data));
 	dht11_read_complete=0;
-	
-	DDRC |= _BV(PC3);	
+	PORTC &= ~_BV(PC3);
+	DDRC |= _BV(PC3);
 	while (countdown-- != 0)
 	{
 		_delay_ms(1);
@@ -546,11 +551,8 @@ void init(void)
 	DDRB = 0;
 	PORTB = 0xFF;
 
-	DDRC = 0;	
+	DDRC = _BV(PC3);	
 	PORTC = 0xFF;
-
-	DDRC |= _BV(PC3);
-	PORTC &= ~_BV(PC3);
 
 	ACSR = _BV(ACD);
 #ifdef TMP275
@@ -634,6 +636,7 @@ int main(void)
 		{
 #if defined DHT11 || defined DHT22
 			dht11_start_conversion();
+			PORTC |= _BV(PC5);
 #elif defined TMP275
 			tmp275_start_conversion();
 #endif
@@ -657,8 +660,10 @@ int main(void)
 
 #endif
 			if (conversionComplete && !(ADCSRA & _BV(ADEN)) )
+			{
+				PORTC &= ~_BV(PC5);
 				th_state = TH_STATE_READ;
-
+			}
 		}
 		else if (TH_STATE_READ == th_state)
 		{

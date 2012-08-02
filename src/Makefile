@@ -75,17 +75,18 @@ FUSE_E  = 0x00
 #  DHT22 (works for the RHT03 as well)
 #  TMP275
 
-SENSOR=TMP275
+SENSOR=DHT22
+#SENSOR=TMP275
 
 # MRBus
 #DEFINES = -DMRBUS
-#SRCS = $(BASE_NAME).c ../../mrbus/src/mrbus-avr.c ../../mrbus/src/mrbus-crc.c
-#INCS = ../../mrbus/src/mrbus.h ../../mrbus/src/mrbus-avr.h
+SRCS = $(BASE_NAME).c ../../mrbus/src/mrbus-avr.c ../../mrbus/src/mrbus-crc.c
+INCS = ../../mrbus/src/mrbus.h ../../mrbus/src/mrbus-avr.h
 
 # MRBee
-DEFINES = -DMRBEE -DMRBEE_BAUD=115200 -DLOWPOWER -DENABLE_WATCHDOG
-SRCS = $(BASE_NAME).c ../../mrbus/src/mrbus-crc.c ../../mrbee/src/mrbee.c ../../mrbee/src/xbee.c ../../libs/avr-i2c/avr-i2c-master.c
-INCS = ../../mrbus/src/mrbus.h ../../mrbee/src/mrbee.h ../../mrbee/src/xbee.h ../../libs/avr-i2c/avr-i2c-master.h
+#DEFINES = -DMRBEE -DMRBEE_BAUD=115200 -DLOWPOWER -DENABLE_WATCHDOG
+#SRCS = $(BASE_NAME).c ../../mrbus/src/mrbus-crc.c ../../mrbee/src/mrbee.c ../../mrbee/src/xbee.c ../../libs/avr-i2c/avr-i2c-master.c
+#INCS = ../../mrbus/src/mrbus.h ../../mrbee/src/mrbee.h ../../mrbee/src/xbee.h ../../libs/avr-i2c/avr-i2c-master.h
 
 AVRDUDE = avrdude -c usbtiny -p $(DEVICE) 
 
