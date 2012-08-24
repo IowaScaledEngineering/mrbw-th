@@ -1,8 +1,0 @@
-#!/bin/bash
-
-schem=mrbw-th
-
-gschem -p -o $schem.ps -s /usr/share/gEDA/scheme/print.scm $schem.sch 
-ps2pdf $schem.ps
-rm $schem.ps
-acroread $schem.pdf
