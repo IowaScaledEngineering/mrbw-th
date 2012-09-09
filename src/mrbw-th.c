@@ -496,7 +496,7 @@ uint16_t system_sleep(uint16_t sleep_decisecs)
 // and the call to this function in the main function
 
 volatile uint8_t ticks;
-volatile uint8_t decisecs;
+volatile uint16_t decisecs;
 
 void initialize100HzTimer(void)
 {
