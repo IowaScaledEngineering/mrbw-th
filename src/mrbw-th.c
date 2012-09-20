@@ -155,6 +155,36 @@ void PktHandler(void)
 		mrbus_state |= MRBUS_TX_PKT_READY;
 		goto PktIgnore;
 	}
+	else if ('V' == mrbus_rx_buffer[MRBUS_PKT_TYPE])
+    {
+        // Version
+        mrbus_tx_buffer[MRBUS_PKT_DEST] = mrbus_rx_buffer[MRBUS_PKT_SRC];
+        mrbus_tx_buffer[MRBUS_PKT_LEN] = 12;
+        mrbus_tx_buffer[MRBUS_PKT_TYPE] = 'v';
+#ifdef MRBEE
+        mrbus_tx_buffer[6]  = MRBUS_VERSION_WIRELESS;
+#else
+        mrbus_tx_buffer[6]  = MRBUS_VERSION_WIRED;
+#endif
+        mrbus_tx_buffer[7]  = SWREV; // Software Revision
+        mrbus_tx_buffer[8]  = HWREV_MAJOR; // Hardware Major Revision
+        mrbus_tx_buffer[9]  = HWREV_MINOR; // Hardware Minor Revision
+        mrbus_tx_buffer[10] = 'T';
+        mrbus_tx_buffer[11] = 'H';
+        mrbus_state |= MRBUS_TX_PKT_READY;
+        goto PktIgnore;
+    }
+	else if ('X' == mrbus_rx_buffer[MRBUS_PKT_TYPE]) 
+	{
+		// Reset
+		cli();
+		wdt_reset();
+		MCUSR &= ~(_BV(WDRF));
+		WDTCSR |= _BV(WDE) | _BV(WDCE);
+		WDTCSR = _BV(WDE);
+		while(1);  // Force a watchdog reset
+		sei();
+	}
 
 	// FIXME:  Insert code here to handle incoming packets specific
 	// to the device.
