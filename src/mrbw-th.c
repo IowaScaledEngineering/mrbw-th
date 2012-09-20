@@ -148,6 +148,7 @@ void PktHandler(void)
 	{
 		// EEPROM READ Packet
 		mrbus_tx_buffer[MRBUS_PKT_DEST] = mrbus_rx_buffer[MRBUS_PKT_SRC];
+		mrbus_tx_buffer[MRBUS_PKT_SRC] = mrbus_dev_addr;
 		mrbus_tx_buffer[MRBUS_PKT_LEN] = 8;			
 		mrbus_tx_buffer[MRBUS_PKT_TYPE] = 'r';
 		mrbus_tx_buffer[6] = mrbus_rx_buffer[6];
@@ -159,6 +160,7 @@ void PktHandler(void)
     {
         // Version
         mrbus_tx_buffer[MRBUS_PKT_DEST] = mrbus_rx_buffer[MRBUS_PKT_SRC];
+		mrbus_tx_buffer[MRBUS_PKT_SRC] = mrbus_dev_addr;
         mrbus_tx_buffer[MRBUS_PKT_LEN] = 12;
         mrbus_tx_buffer[MRBUS_PKT_TYPE] = 'v';
 #ifdef MRBEE
@@ -633,6 +635,15 @@ int main(void)
 
 	// Initialize MRBus core
 	mrbusInit();
+
+	// Prep for initial 'v' packet - fake a 'V' request
+	mrbus_rx_buffer[0] = 0xFF;
+	mrbus_rx_buffer[1] = 0xFF;
+	mrbus_rx_buffer[2] = 0x06;
+	mrbus_rx_buffer[3] = 0x6E;
+	mrbus_rx_buffer[4] = 0x7F;
+	mrbus_rx_buffer[5] = 0x56;
+    mrbus_state |= MRBUS_RX_PKT_READY;
 
 	sei();	
 
