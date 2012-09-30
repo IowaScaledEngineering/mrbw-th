@@ -74,25 +74,29 @@ FUSE_E  = 0x00
 #  DHT11
 #  DHT22 (works for the RHT03 as well)
 #  TMP275
+#  CPS150 - Concensic CPS150 temperature / pressure
+#  DUMMY_SENSOR (for power consumption testing only)
 
+SENSOR=CPS150
+#SENSOR=DUMMY_SENSOR
 #SENSOR=DHT22
-SENSOR=TMP275
+#SENSOR=TMP275
 
 # MRBus
-DEFINES = -DMRBUS -DSWREV=0 -DHWREV_MAJOR=1 -DHWREV_MINOR=0
-SRCS = $(BASE_NAME).c ../../mrbus/src/mrbus-avr.c ../../mrbus/src/mrbus-crc.c ../../libs/avr-i2c/avr-i2c-master.c
-INCS = ../../mrbus/src/mrbus.h ../../mrbus/src/mrbus-avr.h ../../libs/avr-i2c/avr-i2c-master.h
+#DEFINES = -DMRBUS -DSWREV=0 -DHWREV_MAJOR=1 -DHWREV_MINOR=0
+#SRCS = $(BASE_NAME).c ../../mrbus/src/mrbus-avr.c ../../mrbus/src/mrbus-crc.c
+#INCS = ../../mrbus/src/mrbus.h ../../mrbus/src/mrbus-avr.h
 
 # MRBee
-#DEFINES = -DMRBEE -DMRBEE_BAUD=115200 -DLOWPOWER -DENABLE_WATCHDOG -DSWREV=0 -DHWREV_MAJOR=1 -DHWREV_MINOR=0
-#SRCS = $(BASE_NAME).c ../../mrbus/src/mrbus-crc.c ../../mrbee/src/mrbee.c ../../mrbee/src/xbee.c ../../libs/avr-i2c/avr-i2c-master.c
-#INCS = ../../mrbus/src/mrbus.h ../../mrbee/src/mrbee.h ../../mrbee/src/xbee.h ../../libs/avr-i2c/avr-i2c-master.h
+DEFINES = -DMRBEE -DMRBEE_BAUD=115200 -DLOWPOWER -DENABLE_WATCHDOG -DSWREV=0 -DHWREV_MAJOR=1 -DHWREV_MINOR=0
+SRCS = $(BASE_NAME).c ../../mrbus/src/mrbus-crc.c ../../mrbee/src/mrbee.c ../../mrbee/src/xbee.c ../../libs/avr-i2c/avr-i2c-master.c
+INCS = ../../mrbus/src/mrbus.h ../../mrbee/src/mrbee.h ../../mrbee/src/xbee.h ../../libs/avr-i2c/avr-i2c-master.h
 
 AVRDUDE = avrdude -c usbtiny -p $(DEVICE) 
 
 OBJS = ${SRCS:.c=.o}
 INCLUDES = -I. -I../../mrbus/src -I../../mrbee/src -I../../libs/avr-i2c/
-CFLAGS  = $(INCLUDES) -Wall -Os
+CFLAGS  = $(INCLUDES) -Wall -Os -ffunction-sections -Wl,-gc-sections
 
 COMPILE = avr-gcc $(DEFINES) -D$(SENSOR) -DF_CPU=$(F_CPU) $(CFLAGS) -mmcu=$(DEVICE)
 
