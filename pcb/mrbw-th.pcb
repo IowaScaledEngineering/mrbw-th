@@ -1,5 +1,5 @@
 # release: pcb 20100929
-# date:    Mon Oct  1 21:15:41 2012
+# date:    Mon Oct  1 21:21:44 2012
 # user:    railfan (Michael Petersen,,,)
 # host:    sylvanite
 
@@ -2212,7 +2212,7 @@ Layer(4 "silk")
 	Line[104000 164000 104000 171000 1000 2000 "clearline"]
 	Line[104000 171000 72000 171000 1000 2000 "clearline"]
 	Line[72000 171000 72000 164000 1000 2000 "clearline"]
-	Text[9000 103000 0 100 "(C)2012" "clearline"]
+	Text[9000 102000 0 100 "(C)2012" "clearline"]
 	Text[131500 9000 2 100 "A" "clearline"]
 	Text[111500 9000 2 100 "B" "clearline"]
 	Text[52000 11500 2 100 "RSSI" "clearline"]
@@ -2220,7 +2220,7 @@ Layer(4 "silk")
 	Text[174000 9000 2 100 "VIN" "clearline"]
 	Text[155500 9000 2 100 "GND" "clearline"]
 	Text[77500 9000 2 100 "ASSOC" "clearline"]
-	Text[155500 134500 0 100 "MRBW-TH / MRB-TH v1.1" "clearline"]
+	Text[155000 134500 0 100 "MRBW-TH / MRB-TH v1.2" "clearline"]
 	Text[137000 130500 1 100 "Iowa Scaled Engineering" "clearline"]
 	Polygon("")
 	(
@@ -2232,7 +2232,7 @@ Layer(4 "silk")
 	)
 	Polygon("")
 	(
-		[12000 115000] [14000 115000] [14000 117000] [12000 117000] 
+		[13000 111000] [15000 111000] [15000 113000] [13000 113000] 
 	)
 	Polygon("")
 	(
