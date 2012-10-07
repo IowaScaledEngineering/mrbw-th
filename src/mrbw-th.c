@@ -135,7 +135,7 @@ void PktHandler(void)
 		else if (TH_EE_NUM_AVG == mrbus_rx_buffer[6])
 		{
 			num_avg = eeprom_read_byte((uint8_t*)TH_EE_NUM_AVG);			
-#if defined DHT11 || defined DHT22 || defined TMP275 || CPS150
+#if defined DHT11 || defined DHT22 || defined TMP275 || defined CPS150 || defined HYT221
 			num_avg = 1;
 #endif
 		}
@@ -269,8 +269,11 @@ uint8_t cps150_read_value(uint16_t* kelvinTemp, uint16_t* barometricPressure)
 	Phpa = [Pval] * (3600 / 65536) + 300
 	*/
 	
-	tmpVal = ((uint16_t)msgBuf[2]) + ((((uint16_t)msgBuf[1]) & 0x3F)<<8);
+	tmpVal = ((((uint16_t)msgBuf[1]) & 0x3F)<<8) | ((uint16_t)msgBuf[2]);
 	*barometricPressure = (((((uint32_t)tmpVal) * 3600)>>16) & 0xFFFF) + 300;
+
+	//*barometricPressure = ((uint16_t)msgBuf[1])<<8 | (uint16_t)msgBuf[2];
+	
 
 	/*
 	The mathematics of temperature conversion
@@ -285,8 +288,85 @@ uint8_t cps150_read_value(uint16_t* kelvinTemp, uint16_t* barometricPressure)
 	T16k = [Tval] * (10560 / 65536) + 3730
 	*/
 
-	tmpVal = ((((uint16_t)msgBuf[4])>>2) & 0x3F) + (((uint16_t)msgBuf[3])<<6);
+	tmpVal = (((uint16_t)msgBuf[3])<<6) | ((((uint16_t)msgBuf[4])>>2) & 0x3F);
 	*kelvinTemp = (((((uint32_t)tmpVal) * 10560)>>16) & 0xFFFF) + 3730;
+
+	//*kelvinTemp = (((uint16_t)msgBuf[3])<<6) | (((uint16_t)msgBuf[4])>>2);
+		
+	return(msgBuf[0] & 0xC0);
+}
+
+#endif
+
+#ifdef HYT221
+#include "avr-i2c-master.h"
+
+#define HYT221_I2C_ADDR        (0x28<<1)
+
+#define HYT221_STATUS_DATA_VALID    0x00
+#define HYT221_STATUS_DATA_STALE    0x01
+
+volatile uint8_t hyt221_read_countdown=0;
+
+void hyt221_start_conversion()
+{
+    uint8_t msgBuf[2];
+	memset(msgBuf, 0, sizeof(msgBuf));    
+    msgBuf[0] = HYT221_I2C_ADDR;
+    msgBuf[1] = 0x00;
+    i2c_transmit(msgBuf, 1, 0);
+    while(i2c_busy());
+    hyt221_read_countdown = 5;
+}
+
+/* From the datasheet:
+An example of the 14-bit compensated pressure with a full scale range of 30 to 120kPa can be calculated as follows:
+Pressure [kPa] = (Pressure High Byte [5:0] x 256 + Pressure Low Byte [7:0]) / 2^14 x 90 + 30
+
+The 14-bit compensated temperature can be calculated as follows:
+
+Temperature [°C] = (Temperature High Byte [7:0] x 64 + Temperature Low Byte [7:2] / 4) / 2^14 x 165 – 40
+
+*/
+
+uint8_t hyt221_read_value(uint16_t* kelvinTemp, uint16_t* relativeHumidity)
+{
+    uint8_t msgBuf[6];
+	uint16_t tmpVal=0;
+	memset(msgBuf, 0, sizeof(msgBuf));
+
+    msgBuf[0] = HYT221_I2C_ADDR + 0x01;  // Read address
+    i2c_transmit(msgBuf, 5, 0);
+	i2c_receive(msgBuf, 5);
+
+	/*
+	The mathematics of pressure conversion
+	The goal is an output in hectoPascals
+	RH = [RHval] * (100 / 16384)
+	// Output is in 1/2 percent RH
+	RH*2 = [RHval] * (200 / 16384)	
+	*/
+	
+	tmpVal = ((((uint16_t)msgBuf[1]) & 0x3F)<<8) | ((uint16_t)msgBuf[2]);
+	*relativeHumidity = ((((uint32_t)tmpVal) * 200)>>14) & 0xFF;
+
+	/*
+	The mathematics of temperature conversion
+	The goal is getting an output in 1/16ths of degrees Kelvin
+	Tc = [Tval] * (165 / 16384) - 40
+	// Multiply the constant by 4 so it's a divide by 2^16
+	Tc = [Tval] * (660 / 65536) - 40
+	// Multiply the top by 16 and the trailing constant offset by 16 to convert to 1/16th degrees C
+	T16c = [Tval] * (10560 / 65536) - 640
+	// Adjust the trailing constant to be in Kelvin rather than in C
+	T16k = [Tval] * (10560 / 65536) - 640 + 4370
+	T16k = [Tval] * (10560 / 65536) + 3730
+	*/
+
+	tmpVal = (((uint16_t)msgBuf[3])<<6) | ((((uint16_t)msgBuf[4])>>2) & 0x3F);
+	*kelvinTemp = (((((uint32_t)tmpVal) * 10560)>>16) & 0xFFFF) + 3730;
+
+	//*kelvinTemp = (((uint16_t)msgBuf[3])<<6) | (((uint16_t)msgBuf[4])>>2);
 		
 	return(msgBuf[0] & 0xC0);
 }
@@ -632,6 +712,11 @@ ISR(TIMER0_COMPA_vect)
 			cps150_read_countdown--;
 #endif
 
+#ifdef HYT221
+		if (hyt221_read_countdown)
+			hyt221_read_countdown--;
+#endif
+
 #ifdef TMP275
 		if (tmp275_read_countdown)
 			tmp275_read_countdown--;
@@ -669,7 +754,7 @@ void init(void)
 	PORTC = 0xFF;
 
 	ACSR = _BV(ACD);
-#if defined TMP275 || defined CPS150
+#if defined TMP275 || defined CPS150 || defined HYT221
 	i2c_master_init();
 #endif
 	
@@ -683,7 +768,7 @@ void init(void)
 #endif
 
 	// Initialize averaging value from EEPROM
-#if defined DHT11 || defined DHT22 || defined TMP275 || defined CPS150
+#if defined DHT11 || defined DHT22 || defined TMP275 || defined CPS150 || defined HYT221
 	num_avg = 1;
 #else
 	num_avg = eeprom_read_byte((uint8_t*)TH_EE_NUM_AVG);
@@ -765,6 +850,8 @@ int main(void)
 			tmp275_start_conversion();
 #elif defined CPS150
 			cps150_start_conversion();
+#elif defined HYT221
+			hyt221_start_conversion();
 #elif defined DUMMY_SENSOR
 			// Do nothing
 #endif
@@ -787,6 +874,9 @@ int main(void)
 #elif defined CPS150
 			if (0 == cps150_read_countdown)
 				conversionComplete = 1;
+#elif defined HYT221
+			if (0 == hyt221_read_countdown)
+				conversionComplete = 1;
 #elif defined DUMMY_SENSOR
 			// Just wait a while
 			_delay_us(200);
@@ -800,8 +890,8 @@ int main(void)
 		}
 		else if (TH_STATE_READ == th_state)
 		{
-			uint16_t temp, hum;
-
+			uint16_t temp;
+			
 			kelvinTemp = 4370; // Expressed in 1/16ths K, base of 273.15 K
 			relHumidity = 0; // Expressed in 1/10ths % RH		
 
@@ -851,7 +941,10 @@ int main(void)
 			
 #elif defined CPS150
 			cps150_read_value(&kelvinTemp, &barometricPressure);
-				
+
+#elif defined HYT221
+			hyt221_read_value(&kelvinTemp, &relHumidity);
+
 #elif defined DUMMY_SENSOR
 			// Tada!  Both the temperature and humity are going to be 42
 			kelvinTemp = 42;

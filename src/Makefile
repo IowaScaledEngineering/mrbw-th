@@ -76,10 +76,10 @@ FUSE_E  = 0x00
 #  TMP275
 #  CPS150 - Concensic CPS150 temperature / pressure
 #  DUMMY_SENSOR (for power consumption testing only)
-
-SENSOR=CPS150
+#SENSOR=HYT221
+#SENSOR=CPS150
 #SENSOR=DUMMY_SENSOR
-#SENSOR=DHT22
+SENSOR=DHT22
 #SENSOR=TMP275
 
 # MRBus
