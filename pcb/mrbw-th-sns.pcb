@@ -1,5 +1,5 @@
 # release: pcb 20100929
-# date:    Mon Oct  1 21:17:21 2012
+# date:    Mon Oct  1 21:27:51 2012
 # user:    railfan (Michael Petersen,,,)
 # host:    sylvanite
 
@@ -916,6 +916,9 @@ Layer(3 "silk")
 	Line[21500 1500 22500 1500 1000 2000 "clearline,auto"]
 	Text[3000 13000 0 100 "SDA" "clearline,auto"]
 	Text[37000 13000 0 100 "SCL" "clearline,auto"]
+	Text[5000 31000 1 100 "MRBW-TH-SNS v1.0" "clearline,auto"]
+	Text[38500 25500 1 100 "Iowa Scaled Engineering" "clearline,auto"]
+	Text[7500 103000 0 100 "iascaled.com" "clearline,auto"]
 )
 Layer(4 "silk")
 (
