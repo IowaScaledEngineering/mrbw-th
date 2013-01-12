@@ -112,7 +112,7 @@ C 64200 51700 1 0 0 mega48-tqfp32.sym
 T 68700 58200 5 10 1 1 0 6 1
 refdes=U2
 T 64500 58500 5 10 0 0 0 0 1
-device=ATMega48-TQFP32
+device=ATMega328-TQFP32
 T 68000 51800 5 10 1 1 0 0 1
 footprint=TQFP32
 }
@@ -920,3 +920,5 @@ T 70600 54400 9 10 1 0 0 5 1
 (MRBW: 1k)
 T 70000 50400 9 10 1 0 90 5 1
 (MRBW: not populated)
+T 42100 60400 9 10 1 0 0 0 1
+MRBW: D5 is metal short
