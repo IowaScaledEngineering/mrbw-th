@@ -1,0 +1,4 @@
+schematics mrbw-th-ext.sch
+output-name ../pcb/mrbw-th-ext
+skip-m4
+elements-dir ../../../footprints
