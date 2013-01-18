@@ -6,7 +6,7 @@ FileVersion[20070407]
 PCB["" 63000 200000]
 
 Grid[500.0 0 0 0]
-Cursor[4500 69500 0.000000]
+Cursor[0 15500 0.000000]
 PolyArea[200000000.000000]
 Thermal[0.500000]
 DRC[800 1000 800 1000 2000 800]
@@ -1010,11 +1010,12 @@ Layer(3 "silk")
 	Line[500 500 500 199500 1000 2000 "clearline"]
 	Text[15500 8000 0 100 "SDA" "clearline,onsolder"]
 	Text[37500 8000 0 100 "SCL" "clearline,onsolder"]
-	Text[3500 31500 1 100 "MRBW-TH-SNS v1.0" "clearline,onsolder"]
+	Text[3500 31500 1 100 "MRBW-TH-SNS v1.1" "clearline,onsolder"]
 	Text[52500 26500 1 100 "Iowa Scaled Engineering" "clearline,onsolder"]
 	Text[14000 104000 0 100 "iascaled.com" "clearline,onsolder"]
 	Text[11000 18000 0 100 "EN" "clearline,onsolder"]
 	Text[45000 18000 0 100 "INT" "clearline,onsolder"]
+	Text[21500 179500 0 100 "(C)2013" "clearline,onsolder"]
 	Polygon("clearpoly")
 	(
 		[13500 11000] [15500 11000] [15500 9000] [13500 9000] 
