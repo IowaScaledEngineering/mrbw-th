@@ -6,7 +6,7 @@ FileVersion[20070407]
 PCB["" 63000 140000]
 
 Grid[500.0 0 0 0]
-Cursor[3000 32000 0.000000]
+Cursor[0 16500 0.000000]
 PolyArea[200000000.000000]
 Thermal[0.500000]
 DRC[800 800 800 1000 2000 800]
@@ -967,9 +967,37 @@ Layer(2 "solder")
 )
 Layer(3 "silk")
 (
-	Text[22000 24000 0 100 "(C)2013" "clearline,onsolder"]
+	Line[34000 25000 34000 22000 1000 2000 "clearline"]
+	Line[32000 22000 36000 22000 1000 2000 "clearline"]
+	Line[32500 20000 35500 20000 1000 2000 "clearline"]
+	Line[33500 18000 34500 18000 1000 2000 "clearline"]
+	Line[29000 23000 29000 20000 1000 2000 "clearline"]
+	Line[27500 21500 30500 21500 1000 2000 "clearline"]
+	Line[16000 26000 16000 18500 1000 2000 "clearline"]
+	Line[42500 25000 42500 19500 1000 2000 "clearline"]
+	Line[500 139500 62500 139500 1000 2000 "clearline"]
+	Line[62500 139500 62500 500 1000 2000 "clearline"]
+	Line[62500 500 500 500 1000 2000 "clearline"]
+	Line[500 500 500 139500 1000 2000 "clearline"]
+	Text[22000 122000 0 100 "(C)2013" "clearline,onsolder"]
 	Text[6500 38500 1 100 "Iowa Scaled Engineering" "clearline,onsolder"]
-	Text[49500 44500 1 100 "MRBW-TH-EXT v1.0" "clearline,onsolder"]
+	Text[52000 44500 1 100 "MRBW-TH-EXT v1.0" "clearline,onsolder"]
+	Text[36500 17000 1 80 "SDA" "clearline,onsolder"]
+	Text[21500 18000 1 80 "SCL" "clearline,onsolder"]
+	Text[16500 19000 1 80 "INT" "clearline,onsolder"]
+	Text[43000 20000 1 80 "EN" "clearline,onsolder"]
+	Polygon("clearpoly")
+	(
+		[47500 29500] [49500 29500] [49500 27500] [47500 27500] 
+	)
+	Polygon("clearpoly")
+	(
+		[47500 71000] [49500 71000] [49500 69000] [47500 69000] 
+	)
+	Polygon("clearpoly")
+	(
+		[13500 112500] [15500 112500] [15500 110500] [13500 110500] 
+	)
 )
 Layer(4 "silk")
 (
@@ -977,6 +1005,18 @@ Layer(4 "silk")
 	Line[62500 500 62500 139500 1000 2000 "clearline"]
 	Line[62500 139500 500 139500 1000 2000 "clearline"]
 	Line[500 139500 500 500 1000 2000 "clearline"]
+	Polygon("clearpoly")
+	(
+		[47500 27500] [49500 27500] [49500 29500] [47500 29500] 
+	)
+	Polygon("clearpoly")
+	(
+		[47500 69000] [49500 69000] [49500 71000] [47500 71000] 
+	)
+	Polygon("clearpoly")
+	(
+		[13500 110500] [15500 110500] [15500 112500] [13500 112500] 
+	)
 )
 NetList()
 (
