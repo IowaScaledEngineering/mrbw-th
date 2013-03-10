@@ -135,7 +135,7 @@ void PktHandler(void)
 		else if (TH_EE_NUM_AVG == mrbus_rx_buffer[6])
 		{
 			num_avg = eeprom_read_byte((uint8_t*)TH_EE_NUM_AVG);			
-#if defined DHT11 || defined DHT22 || defined TMP275 || defined CPS150 || defined HYT221
+#if defined DHT11 || defined DHT22 || defined TMP275 || defined TMP275EXT || defined CPS150 || defined HYT221
 			num_avg = 1;
 #endif
 		}
@@ -378,7 +378,7 @@ uint8_t hyt221_read_value(uint16_t* kelvinTemp, uint16_t* relativeHumidity)
 
 
 
-#ifdef TMP275
+#if defined TMP275 || TMP275EXT
 
 #include "avr-i2c-master.h"
 
@@ -389,30 +389,29 @@ uint8_t hyt221_read_value(uint16_t* kelvinTemp, uint16_t* relativeHumidity)
 
 volatile uint8_t tmp275_read_countdown=0;
 
-void tmp275_start_conversion()
+void tmp275_start_conversion(uint8_t addr)
 {
-    uint8_t msgBuf[4];
-    msgBuf[0] = 0x9E;
+    uint8_t msgBuf[3];
+    msgBuf[0] = addr;
     msgBuf[1] = 0x01;
     msgBuf[2] = 0xE1;
-    msgBuf[3] = 0xE1;
-    i2c_transmit(msgBuf, 4, 0);
+    i2c_transmit(msgBuf, 3, 1);
     while(i2c_busy());
-    
+
     tmp275_read_countdown = 3;
 }
 
-uint16_t tmp275_read_value()
+uint16_t tmp275_read_value(uint8_t addr)
 {
     uint8_t msgBuf[4];
-    msgBuf[0] = 0x9E;
+    msgBuf[0] = addr;
     msgBuf[1] = 0x00;
     i2c_transmit(msgBuf, 2, 1);
 	while(i2c_busy());
-    msgBuf[0] = 0x9F;
+    msgBuf[0] = addr+1;
     i2c_transmit(msgBuf, 3, 0);
 	i2c_receive(msgBuf, 3);
-	
+
 	return((((uint16_t)msgBuf[1])<<4) | (0x0F & (msgBuf[2]>>4)));
 }
 
@@ -719,7 +718,7 @@ ISR(TIMER0_COMPA_vect)
 			hyt221_read_countdown--;
 #endif
 
-#ifdef TMP275
+#if defined TMP275 || TMP275EXT
 		if (tmp275_read_countdown)
 			tmp275_read_countdown--;
 #endif	
@@ -756,7 +755,7 @@ void init(void)
 	PORTC = 0xFF;
 
 	ACSR = _BV(ACD);
-#if defined TMP275 || defined CPS150 || defined HYT221
+#if defined TMP275 || TMP275EXT || defined CPS150 || defined HYT221
 	i2c_master_init();
 #endif
 	
@@ -770,7 +769,7 @@ void init(void)
 #endif
 
 	// Initialize averaging value from EEPROM
-#if defined DHT11 || defined DHT22 || defined TMP275 || defined CPS150 || defined HYT221
+#if defined DHT11 || defined DHT22 || defined TMP275 || TMP275EXT || defined CPS150 || defined HYT221
 	num_avg = 1;
 #else
 	num_avg = eeprom_read_byte((uint8_t*)TH_EE_NUM_AVG);
@@ -787,6 +786,9 @@ void init(void)
 int main(void)
 {
 	uint16_t kelvinTemp = 4370; // Expressed in 1/16ths K, base of 273.15 K
+#if defined TMP275EXT
+	uint16_t kelvinTempExt[7] = {[0 ... 6] = 4370}; // Expressed in 1/16ths K, base of 273.15 K
+#endif
 	uint16_t relHumidity = 0; // Expressed in 1/10ths % RH
 	uint16_t barometricPressure = 0;
 	uint8_t count=0;
@@ -849,7 +851,13 @@ int main(void)
 			dht11_start_conversion();
 			PORTC |= _BV(PC5);
 #elif defined TMP275
-			tmp275_start_conversion();
+			tmp275_start_conversion(0x9E);
+#elif defined TMP275EXT
+			uint8_t tmp275_addr;
+			for(tmp275_addr = 0x90; tmp275_addr < 0x9F; tmp275_addr += 2)
+			{
+				tmp275_start_conversion(tmp275_addr);
+			}
 #elif defined CPS150
 			cps150_start_conversion();
 #elif defined HYT221
@@ -870,7 +878,7 @@ int main(void)
 #if defined DHT11 || defined DHT22
 			if (dht11_read_complete)
 				conversionComplete = 1;
-#elif defined TMP275
+#elif defined TMP275 || TMP275EXT
 			if (0 == tmp275_read_countdown)
 				conversionComplete = 1;
 #elif defined CPS150
@@ -895,6 +903,16 @@ int main(void)
 			uint16_t temp;
 			
 			kelvinTemp = 4370; // Expressed in 1/16ths K, base of 273.15 K
+#if defined TMP275EXT
+			kelvinTempExt[0] = 4370;
+			kelvinTempExt[1] = 4370;
+			kelvinTempExt[2] = 4370;
+			kelvinTempExt[3] = 4370;
+			kelvinTempExt[4] = 4370;
+			kelvinTempExt[5] = 4370;
+			kelvinTempExt[6] = 4370;
+#endif
+
 			relHumidity = 0; // Expressed in 1/10ths % RH		
 
 
@@ -935,12 +953,30 @@ int main(void)
 			else
 				kelvinTemp += temp;
 #elif defined TMP275
-			temp = tmp275_read_value();
+			temp = tmp275_read_value(0x9E);
 			// Sign extend the 12 bit result
 			if (temp & 0x0800)
 				temp |= 0xF000;
 			kelvinTemp += temp;
-			
+
+#elif defined TMP275EXT
+			temp = tmp275_read_value(0x9E);
+			// Sign extend the 12 bit result
+			if (temp & 0x0800)
+				temp |= 0xF000;
+			kelvinTemp += temp;
+
+			uint8_t tmp275_addr, i=0;
+			for(tmp275_addr = 0x90; tmp275_addr < 0x93; tmp275_addr += 2)
+			{
+				wdt_reset();
+				temp = tmp275_read_value(tmp275_addr);
+				// Sign extend the 12 bit result
+				if (temp & 0x0800)
+					temp |= 0xF000;
+				kelvinTempExt[i++] += temp;
+			}
+
 #elif defined CPS150
 			cps150_read_value(&kelvinTemp, &barometricPressure);
 
@@ -980,11 +1016,23 @@ int main(void)
 			mrbus_tx_buffer[7] = (kelvinTemp >> 8);
 			mrbus_tx_buffer[8] = kelvinTemp & 0xff;
 			mrbus_tx_buffer[9] = relHumidity & 0xff;
-			mrbus_tx_buffer[10] = (uint8_t)busVoltage;
 #ifdef CPS150
 			mrbus_tx_buffer[11] = (barometricPressure >> 8);
 			mrbus_tx_buffer[12] = barometricPressure & 0xff;
-			mrbus_tx_buffer[MRBUS_PKT_LEN] = 13;
+#endif
+#ifdef TMP275EXT
+			mrbus_tx_buffer[9]  = (kelvinTempExt[0] >> 8);
+			mrbus_tx_buffer[10] = kelvinTempExt[0] & 0xff;
+			mrbus_tx_buffer[11] = (kelvinTempExt[1] >> 8);
+			mrbus_tx_buffer[12] = kelvinTempExt[1] & 0xff;
+			mrbus_tx_buffer[13] = (kelvinTempExt[2] >> 8);
+			mrbus_tx_buffer[14] = kelvinTempExt[2] & 0xff;
+			mrbus_tx_buffer[15] = (kelvinTempExt[3] >> 8);
+			mrbus_tx_buffer[16] = kelvinTempExt[3] & 0xff;
+			mrbus_tx_buffer[17] = (kelvinTempExt[4] >> 8);
+			mrbus_tx_buffer[18] = kelvinTempExt[4] & 0xff;
+			mrbus_tx_buffer[19] = (uint8_t)busVoltage;
+			mrbus_tx_buffer[MRBUS_PKT_LEN] = 20;
 #endif
 
 			mrbus_state |= MRBUS_TX_PKT_READY;

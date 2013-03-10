@@ -27,47 +27,20 @@
 
 BASE_NAME = mrbw-th
 
-# ATmega164P 20MHz @ 5.0V
-#DEVICE  = atmega164p
-#F_CPU   = 20000000  # Hz
-#FUSE_L  = 0xD7
-#FUSE_H  = 0xD1
-#FUSE_E  = 0x04
-
-# ATmega328P 20MHz @ 5.0V
-#DEVICE  = atmega328p
-#F_CPU   = 20000000  # Hz
-#FUSE_L  = 0xD7
-#FUSE_H  = 0xD1
-#FUSE_E  = 0x04
-
-# ATmega328P 12MHz @ 3.3V
-#DEVICE  = atmega328p
-#F_CPU   = 12000000  # Hz
-#FUSE_L  = 0xD7
-#FUSE_H  = 0xD1
-#FUSE_E  = 0x05
-
-# ATmega328P 3.579545MHz @ 3.3V
-#DEVICE  = atmega328p
-#F_CPU   = 3579545   # Hz
-#FUSE_L  = 0x97      # Clock output on PB0 (Debug)
-#FUSE_H  = 0xD1
-#FUSE_E  = 0x05
-
-# ATmega48 20MHz @ 5.0V
+## ATmega48 11.0592MHz @ 3.3V
 #DEVICE  = atmega48
-#F_CPU   = 20000000  # Hz
+#F_CPU   = 11059200  # Hz
 #FUSE_L  = 0xD7
-#FUSE_H  = 0xD4
+#FUSE_H  = 0xD7
 #FUSE_E  = 0x00
 
-# ATmega48 11.0592MHz @ 3.3V
-DEVICE  = atmega48
+# ATmega328P 11.0592MHz @ 3.3V
+DEVICE  = atmega328p
 F_CPU   = 11059200  # Hz
 FUSE_L  = 0xD7
-FUSE_H  = 0xD7
-FUSE_E  = 0x00
+FUSE_H  = 0xD1
+FUSE_E  = 0x05
+
 
 # Define the sensor type used on the board.
 # Options are:
@@ -79,8 +52,9 @@ FUSE_E  = 0x00
 #SENSOR=HYT221
 #SENSOR=CPS150
 #SENSOR=DUMMY_SENSOR
-SENSOR=DHT22
+#SENSOR=DHT22
 #SENSOR=TMP275
+SENSOR=TMP275EXT
 
 # MRBus
 #DEFINES = -DMRBUS -DSWREV=0 -DHWREV_MAJOR=1 -DHWREV_MINOR=0
@@ -88,11 +62,11 @@ SENSOR=DHT22
 #INCS = ../../mrbus/src/mrbus.h ../../mrbus/src/mrbus-avr.h
 
 # MRBee
-DEFINES = -DMRBEE -DMRBEE_BAUD=115200 -DLOWPOWER -DENABLE_WATCHDOG -DSWREV=0 -DHWREV_MAJOR=1 -DHWREV_MINOR=0
+DEFINES = -DMRBEE -DMRBEE_BAUD=115200 -DLOWPOWER -DXENABLE_WATCHDOG -DSWREV=0 -DHWREV_MAJOR=1 -DHWREV_MINOR=0
 SRCS = $(BASE_NAME).c ../../mrbus/src/mrbus-crc.c ../../mrbee/src/mrbee.c ../../mrbee/src/xbee.c ../../libs/avr-i2c/avr-i2c-master.c
 INCS = ../../mrbus/src/mrbus.h ../../mrbee/src/mrbee.h ../../mrbee/src/xbee.h ../../libs/avr-i2c/avr-i2c-master.h
 
-AVRDUDE = avrdude -c usbtiny -p $(DEVICE) 
+AVRDUDE = avrdude -c usbtiny -p $(DEVICE) -B1
 
 OBJS = ${SRCS:.c=.o}
 INCLUDES = -I. -I../../mrbus/src -I../../mrbee/src -I../../libs/avr-i2c/
