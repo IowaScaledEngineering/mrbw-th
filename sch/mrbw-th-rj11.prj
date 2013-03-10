@@ -1,0 +1,4 @@
+schematics mrbw-th-rj11.sch
+output-name ../pcb/mrbw-th-rj11
+skip-m4
+elements-dir ../../../footprints
