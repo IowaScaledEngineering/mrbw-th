@@ -406,10 +406,10 @@ uint16_t tmp275_read_value(uint8_t addr)
     uint8_t msgBuf[4];
     msgBuf[0] = addr;
     msgBuf[1] = 0x00;
-    i2c_transmit(msgBuf, 2, 1);
+    i2c_transmit(msgBuf, 2, 0);
 	while(i2c_busy());
     msgBuf[0] = addr+1;
-    i2c_transmit(msgBuf, 3, 0);
+    i2c_transmit(msgBuf, 3, 1);
 	i2c_receive(msgBuf, 3);
 
 	return((((uint16_t)msgBuf[1])<<4) | (0x0F & (msgBuf[2]>>4)));
@@ -754,6 +754,8 @@ void init(void)
 	DDRC = _BV(PC3);	
 	PORTC = 0xFF;
 
+DDRC |= _BV(PC2);
+
 	ACSR = _BV(ACD);
 #if defined TMP275 || TMP275EXT || defined CPS150 || defined HYT221
 	i2c_master_init();
@@ -967,9 +969,8 @@ int main(void)
 			kelvinTemp += temp;
 
 			uint8_t tmp275_addr, i=0;
-			for(tmp275_addr = 0x90; tmp275_addr < 0x93; tmp275_addr += 2)
+			for(tmp275_addr = 0x90; tmp275_addr < 0x9D; tmp275_addr += 2)
 			{
-				wdt_reset();
 				temp = tmp275_read_value(tmp275_addr);
 				// Sign extend the 12 bit result
 				if (temp & 0x0800)
