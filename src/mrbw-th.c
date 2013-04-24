@@ -29,6 +29,8 @@ LICENSE:
 #include <avr/eeprom.h>
 #include <util/delay.h>
 
+#include "mrbus.h"
+
 #ifdef MRBEE
 // If wireless, redefine the common variables and functions
 #include "mrbee.h"
@@ -42,7 +44,7 @@ LICENSE:
 #define mrbusPacketTransmit mrbeePacketTransmit
 #endif
 
-#include "mrbus.h"
+
 
 #define TH_STATE_IDLE          0x00
 #define TH_STATE_TRIGGER       0x10 
