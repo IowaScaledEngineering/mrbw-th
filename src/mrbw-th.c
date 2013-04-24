@@ -44,11 +44,6 @@ LICENSE:
 
 #include "mrbus.h"
 
-extern uint8_t mrbus_activity;
-extern uint8_t mrbus_rx_buffer[MRBUS_BUFFER_SIZE];
-extern uint8_t mrbus_tx_buffer[MRBUS_BUFFER_SIZE];
-extern uint8_t mrbus_state;
-
 #define TH_STATE_IDLE          0x00
 #define TH_STATE_TRIGGER       0x10 
 #define TH_STATE_WAIT          0x20
