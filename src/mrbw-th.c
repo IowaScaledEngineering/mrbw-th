@@ -582,9 +582,6 @@ uint16_t system_sleep(uint16_t sleep_decisecs)
 {
 	uint16_t slept = 0;
 
-	// Sleep the XBee
-	PORTD |= _BV(PD7);
-
 	while(slept < sleep_decisecs)
 	{
 		uint16_t remaining_sleep = sleep_decisecs - slept;
@@ -664,13 +661,11 @@ uint16_t system_sleep(uint16_t sleep_decisecs)
 	wdt_disable();
 #endif
 
-	// Unsleep the XBee
-	PORTD &= ~_BV(PD7);
-
 	return(slept);
 }
 
 #endif
+
 
 // ******** Start 100 Hz Timer, 0.16% error version (Timer 0)
 // If you can live with a slightly less accurate timer, this one only uses Timer 0, leaving Timer 1 open
@@ -742,6 +737,7 @@ void init(void)
 	wdt_disable();
 #endif
 
+	// Set sleep pin to output; drive low
 	DDRD = _BV(PD7);
 	PORTD = 0x7F;
 
@@ -751,7 +747,7 @@ void init(void)
 	DDRC = _BV(PC3);	
 	PORTC = 0xFF;
 
-DDRC |= _BV(PC2);
+	DDRC |= _BV(PC2);
 
 	ACSR = _BV(ACD);
 #if defined TMP275 || TMP275EXT || defined CPS150 || defined HYT221
@@ -796,6 +792,7 @@ int main(void)
 #else
 	uint8_t dht11_powerup_lockout = 0;
 #endif
+        uint16_t decisecs_snapshot;
 
 	// Application initialization
 	init();
@@ -803,7 +800,7 @@ int main(void)
 	// Initialize a 100 Hz timer.  See the definition for this function - you can
 	// remove it if you don't use it.
 	initialize100HzTimer();
-
+	
 	// Initialize MRBus core
 	mrbusInit();
 
@@ -814,7 +811,7 @@ int main(void)
 	mrbus_rx_buffer[3] = 0x6E;
 	mrbus_rx_buffer[4] = 0x7F;
 	mrbus_rx_buffer[5] = 0x56;
-    mrbus_state |= MRBUS_RX_PKT_READY;
+	mrbus_state |= MRBUS_RX_PKT_READY;
 
 	sei();	
 
@@ -836,7 +833,10 @@ int main(void)
 		// Both of these restrictions come from the datasheet
 
 		if (dht11_powerup_lockout && decisecs > 12)
+		{
 			dht11_powerup_lockout = 0;
+			th_state = TH_STATE_TRIGGER;
+                }
 
 		if ((TH_STATE_IDLE == th_state) && (decisecs >= pkt_period) && !dht11_powerup_lockout)
 		{
@@ -989,13 +989,6 @@ int main(void)
 			// Div by 8, as we use 8 samples
 			busVoltage = busVoltage >> 3;  
 
-#ifdef LOWPOWER
-			busVoltage = ((uint32_t)busVoltage * 33) >> 10;
-#else			
-			//At this point, we're at (Vbus/6) / 5 * 1024
-			//So multiply by 300, divide by 1024, or multiply by 75 and divide by 256
-			busVoltage = ((uint32_t)busVoltage * 75) >> 8;
-#endif
 			if(++count >= num_avg)
 			{
 				th_state = TH_STATE_SEND_PACKET;
@@ -1014,6 +1007,7 @@ int main(void)
 			mrbus_tx_buffer[7] = (kelvinTemp >> 8);
 			mrbus_tx_buffer[8] = kelvinTemp & 0xff;
 			mrbus_tx_buffer[9] = relHumidity & 0xff;
+			mrbus_tx_buffer[10] = (VINDIV * VDD * (uint32_t)busVoltage) / 1024;  // VINDIV is reciprocal of VIN divider ratio.  VDD is in decivolts
 #ifdef CPS150
 			mrbus_tx_buffer[11] = (barometricPressure >> 8);
 			mrbus_tx_buffer[12] = barometricPressure & 0xff;
@@ -1056,8 +1050,15 @@ int main(void)
 				wdt_reset();							
 				_delay_ms(10);
 			}
-
-			decisecs += system_sleep(pkt_period);
+			
+			// Grab snapshot of decisecs to make sure it doesn't advance between
+			// the comparison and the subtraction, causing a "negative" sleep value.
+			decisecs_snapshot = decisecs;
+                        if(decisecs_snapshot < pkt_period)
+                        {
+                            // Not yet at pkt_period, sleep for remaining time
+                            decisecs += system_sleep(pkt_period - decisecs_snapshot);
+                        }
 			th_state = TH_STATE_WAKE;
 		}
 		
@@ -1072,6 +1073,10 @@ int main(void)
 		// If we have a packet to be transmitted, try to send it here
 		while(mrbus_state & MRBUS_TX_PKT_READY)
 		{
+#ifndef MRBEE
+                        uint8_t bus_countdown;
+#endif
+                        
 			// Even while we're sitting here trying to transmit, keep handling
 			// any packets we're receiving so that we keep up with the current state of the
 			// bus.  Obviously things that request a response cannot go, since the transmit
@@ -1079,6 +1084,13 @@ int main(void)
 			if (mrbus_state & MRBUS_RX_PKT_READY)
 				PktHandler();
 
+#ifdef MRBEE
+            // Unsleep the XBee
+            PORTD &= ~_BV(PD7);
+#endif
+
+            // XBee ISR waits for XBee to start by watching for /CTS to assert low
+            // Assuming XBEE_IGNORE_FLOW *not* defined
 
 			if (0 == mrbusPacketTransmit())
 			{
@@ -1096,18 +1108,22 @@ int main(void)
 			// Because MRBus has a minimum packet size of 6 bytes @ 57.6kbps,
 			// need to check roughly every millisecond to see if we have a new packet
 			// so that we don't miss things we're receiving while waiting to transmit
+			bus_countdown = 20;
+			while (bus_countdown-- > 0 && MRBUS_ACTIVITY_RX_COMPLETE != mrbus_activity)
 			{
-				uint8_t bus_countdown = 20;
-				while (bus_countdown-- > 0 && MRBUS_ACTIVITY_RX_COMPLETE != mrbus_activity)
-				{
-					//clrwdt();
-					_delay_ms(1);
-					if (mrbus_state & MRBUS_RX_PKT_READY) 
-						PktHandler();
-				}
+				//clrwdt();
+				_delay_ms(1);
+				if (mrbus_state & MRBUS_RX_PKT_READY) 
+					PktHandler();
 			}
 #endif
 		}
+#ifdef MRBEE
+        // Wait for XBee TX ISR to finish
+        do {wdt_reset();} while (bit_is_set(UCSR0B, UDRIE0));
+        // Sleep the XBee
+        PORTD |= _BV(PD7);
+#endif
 	}
 }
 
