@@ -1,5 +1,5 @@
 #*************************************************************************
-#Title:    MRB-AVRTEMPLATE Makefile
+#Title:    MRBW-TH Makefile
 #Authors:  Michael Petersen <railfan@drgw.net>
 #          Nathan Holmes <maverick@drgw.net>
 #File:     MRB-AVRTEMPLATE Makefile
