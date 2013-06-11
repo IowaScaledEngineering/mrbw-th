@@ -82,7 +82,7 @@ INCS = ../../mrbus/src/mrbus.h ../../mrbus/src/mrbus-avr.h
 #SRCS = $(BASE_NAME).c ../../mrbus/src/mrbus-crc.c ../../mrbee/src/mrbee.c ../../mrbee/src/xbee.c ../../libs/avr-i2c/avr-i2c-master.c
 #INCS = ../../mrbus/src/mrbus.h ../../mrbee/src/mrbee.h ../../mrbee/src/xbee.h ../../libs/avr-i2c/avr-i2c-master.h
 
-AVRDUDE = avrdude -c usbtiny -p $(DEVICE) -B1
+AVRDUDE = avrdude -c usbtiny -p $(DEVICE)
 
 OBJS = ${SRCS:.c=.o}
 INCLUDES = -I. -I../../mrbus/src -I../../mrbee/src -I../../libs/avr-i2c/
