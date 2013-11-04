@@ -27,19 +27,25 @@
 
 BASE_NAME = mrbw-th
 
-# ATmega48 11.0592MHz @ 3.3V
-#DEVICE  = atmega48p
-#F_CPU   = 11059200  # Hz
-#FUSE_L  = 0xD7
-#FUSE_H  = 0xD7
-#FUSE_E  = 0x00
-
-# ATmega328 11.0592MHz @ 3.3V
-DEVICE  = atmega328
+# ATmega48P 11.0592MHz @ 3.3V
+DEVICE  = atmega48p
 F_CPU   = 11059200  # Hz
 FUSE_L  = 0xD7
-FUSE_H  = 0xD1
-FUSE_E  = 0x05
+FUSE_H  = 0xD5
+FUSE_E  = 0x00
+# 3.3V with AA-cell using 3528
+VDD     = 33   # Voltage in decivolts
+VINDIV  = 1    # Reciprocal of VIN divider ratio
+
+# ATmega328 11.0592MHz @ 5.0V
+#DEVICE  = atmega328
+#F_CPU   = 11059200  # Hz
+#FUSE_L  = 0xD7
+#FUSE_H  = 0xD1
+#FUSE_E  = 0x04
+## 5.0V with 12V using 78L05
+#VDD     = 50   # Voltage in decivolts
+#VINDIV  = 6    # Reciprocal of VIN divider ratio
 
 # ATmega328P 11.0592MHz @ 3.3V
 #DEVICE  = atmega328p
@@ -47,6 +53,9 @@ FUSE_E  = 0x05
 #FUSE_L  = 0xD7
 #FUSE_H  = 0xD1
 #FUSE_E  = 0x05
+## 3.3V with AA-cell using 3528
+#VDD     = 33   # Voltage in decivolts
+#VINDIV  = 1    # Reciprocal of VIN divider ratio
 
 
 # Define the sensor type used on the board.
@@ -56,39 +65,31 @@ FUSE_E  = 0x05
 #  TMP275
 #  CPS150 - Concensic CPS150 temperature / pressure
 #  DUMMY_SENSOR (for power consumption testing only)
-#SENSOR=HYT221
+SENSOR=HYT221
 #SENSOR=CPS150
 #SENSOR=DUMMY_SENSOR
-SENSOR=DHT22
+#SENSOR=DHT22
 #SENSOR=TMP275
-#SENSOR=TMP275EXT
-
-# Define the power supply
-# 3.3V with AA-cell using 3528
-#VDD     = 33   # Voltage in decivolts
-#VINDIV  = 1    # Reciprocal of VIN divider ratio
-# 5.0V with 12V using 78L05
-VDD     = 50   # Voltage in decivolts
-VINDIV  = 6    # Reciprocal of VIN divider ratio
+SENSOR2=TMP275EXT
 
 
 # MRBus
-DEFINES = -DMRBUS -DSWREV=0 -DHWREV_MAJOR=1 -DHWREV_MINOR=0
-SRCS = $(BASE_NAME).c ../../mrbus/src/mrbus-avr.c ../../mrbus/src/mrbus-crc.c
-INCS = ../../mrbus/src/mrbus.h ../../mrbus/src/mrbus-avr.h
+#DEFINES = -DMRBUS -DSWREV=0 -DHWREV_MAJOR=1 -DHWREV_MINOR=0
+#SRCS = $(BASE_NAME).c ../../mrbus/src/mrbus-avr.c ../../mrbus/src/mrbus-crc.c
+#INCS = ../../mrbus/src/mrbus.h ../../mrbus/src/mrbus-avr.h
 
 # MRBee
-#DEFINES = -DMRBEE -DMRBEE_BAUD=115200 -DLOWPOWER -DENABLE_WATCHDOG -DSWREV=0 -DHWREV_MAJOR=1 -DHWREV_MINOR=0
-#SRCS = $(BASE_NAME).c ../../mrbus/src/mrbus-crc.c ../../mrbee/src/mrbee.c ../../mrbee/src/xbee.c ../../libs/avr-i2c/avr-i2c-master.c
-#INCS = ../../mrbus/src/mrbus.h ../../mrbee/src/mrbee.h ../../mrbee/src/xbee.h ../../libs/avr-i2c/avr-i2c-master.h
+DEFINES = -DMRBEE -DMRBEE_BAUD=115200 -DLOWPOWER -DENABLE_WATCHDOG -DSWREV=0 -DHWREV_MAJOR=1 -DHWREV_MINOR=0
+SRCS = $(BASE_NAME).c ../../mrbus/src/mrbus-crc.c ../../mrbee/src/mrbee.c ../../mrbee/src/xbee.c ../../libs/avr-i2c/avr-i2c-master.c
+INCS = ../../mrbus/src/mrbus.h ../../mrbee/src/mrbee.h ../../mrbee/src/xbee.h ../../libs/avr-i2c/avr-i2c-master.h
 
-AVRDUDE = avrdude -c usbtiny -p $(DEVICE)
+AVRDUDE = avrdude -c usbtiny -p $(DEVICE) -B1
 
 OBJS = ${SRCS:.c=.o}
 INCLUDES = -I. -I../../mrbus/src -I../../mrbee/src -I../../libs/avr-i2c/
 CFLAGS  = $(INCLUDES) -Wall -Os -ffunction-sections -Wl,-gc-sections
 
-COMPILE = avr-gcc $(DEFINES) -D$(SENSOR) -DF_CPU=$(F_CPU) -DVDD=$(VDD) -DVINDIV=$(VINDIV) $(CFLAGS) -mmcu=$(DEVICE)
+COMPILE = avr-gcc $(DEFINES) -D$(SENSOR) -D$(SENSOR2) -DF_CPU=$(F_CPU) -DVDD=$(VDD) -DVINDIV=$(VINDIV) $(CFLAGS) -mmcu=$(DEVICE)
 
 # -E -dM options preprocess only and output results of #define
 #COMPILE = avr-gcc -Wall -Os -DF_CPU=$(F_CPU) $(CFLAGS) -mmcu=$(DEVICE) -E -dM
