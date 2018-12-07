@@ -1305,7 +1305,7 @@ Element["" "EVQP3-switch" "S1" "unknown" 1510.00mil 1240.00mil -25.00mil -20.00m
 
 	)
 
-Element["hidename,onsolder" "KEYSTONE_2462" "J1" "unknown" 2255.00mil 655.00mil 0.0000 0.0000 0 100 "auto"]
+Element["hidename,onsolder" "KEYSTONE_2462" "J1" "unknown" 2250.00mil 655.00mil 0.0000 0.0000 0 100 "auto"]
 (
 	Pin[0.0000 -295.00mil 60.00mil 20.00mil 66.00mil 40.00mil "1" "1" "square,edge2,thermal(0X)"]
 	Pin[0.0000 295.00mil 60.00mil 20.00mil 66.00mil 40.00mil "2" "2" "edge2,thermal(1X)"]
@@ -1698,8 +1698,8 @@ Layer(2 "solder")
 	Line[245.00mil 1165.00mil 165.00mil 1165.00mil 40.00mil 20.00mil "clearline"]
 	Line[1815.00mil 495.00mil 1815.00mil 440.00mil 10.00mil 20.00mil "clearline"]
 	Line[1815.00mil 440.00mil 1850.00mil 405.00mil 10.00mil 20.00mil "clearline"]
-	Line[1850.00mil 405.00mil 2210.00mil 405.00mil 10.00mil 20.00mil "clearline"]
-	Line[2210.00mil 405.00mil 2255.00mil 360.00mil 10.00mil 20.00mil "clearline"]
+	Line[1850.00mil 405.00mil 2205.00mil 405.00mil 10.00mil 20.00mil "clearline"]
+	Line[2205.00mil 405.00mil 2250.00mil 360.00mil 10.00mil 20.00mil "clearline"]
 	Line[425.00mil 965.00mil 485.00mil 965.00mil 10.00mil 20.00mil "clearline"]
 	Line[1635.00mil 345.00mil 1710.00mil 345.00mil 10.00mil 20.00mil "clearline"]
 	Line[1635.00mil 265.00mil 1740.00mil 265.00mil 10.00mil 20.00mil "clearline"]
@@ -1742,6 +1742,10 @@ Layer(4 "silk")
 Layer(5 "silk")
 (
 	Line[1250.00mil 445.00mil 1250.00mil 445.00mil 35.00mil 20.00mil "clearline"]
+	Line[5.00mil 5.00mil 2355.00mil 5.00mil 10.00mil 20.00mil "clearline"]
+	Line[2355.00mil 5.00mil 2355.00mil 1305.00mil 10.00mil 20.00mil "clearline"]
+	Line[2355.00mil 1305.00mil 5.00mil 1305.00mil 10.00mil 20.00mil "clearline"]
+	Line[5.00mil 1305.00mil 5.00mil 5.00mil 10.00mil 20.00mil "clearline"]
 	Text[305.00mil 1140.00mil 0 100 "PWR" "clearline"]
 	Text[700.00mil 1140.00mil 0 100 "RSSI" "clearline"]
 	Text[1075.00mil 1140.00mil 0 100 "ASSOC" "clearline"]
