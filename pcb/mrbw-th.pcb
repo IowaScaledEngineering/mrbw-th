@@ -1093,7 +1093,7 @@ Element["" "0805" "C1" "10uF" 2085.00mil 845.00mil 43.50mil -21.50mil 0 77 ""]
 
 	)
 
-Element["" "MSS6132" "L1" "4.7uH" 1995.00mil 1085.00mil -20.00mil -30.00mil 0 100 ""]
+Element["" "MSS6132" "L1" "4.7uH" 1995.00mil 1085.00mil 150.00mil -30.00mil 0 100 ""]
 (
 	Pad[107.00mil -107.00mil 107.00mil 107.00mil 23.00mil 0.0000 29.00mil "1" "1" "square"]
 	Pad[51.00mil -107.00mil 107.00mil -107.00mil 23.00mil 0.0000 29.00mil "1" "1" "square,edge2"]
@@ -1242,7 +1242,7 @@ Element["" "SHT3x" "U3" "unknown" 1400.00mil 130.00mil -60.00mil -105.00mil 0 77
 
 	)
 
-Element["" "EVQP3-switch" "S1" "unknown" 1510.00mil 1240.00mil -25.00mil -20.00mil 0 100 ""]
+Element["" "EVQP3-switch" "S1" "unknown" 1510.00mil 1240.00mil 130.00mil -30.00mil 0 100 ""]
 (
 	Pin[-2.0250mm -0.8000mm 41.00mil 20.00mil 47.00mil 25.00mil "1" "1" "edge2"]
 	Pin[2.0250mm -0.8000mm 41.00mil 20.00mil 47.00mil 25.00mil "1" "1" "edge2"]
