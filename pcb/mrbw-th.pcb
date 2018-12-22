@@ -1824,7 +1824,7 @@ Layer(5 "silk")
 	Text[1075.00mil 1140.00mil 0 100 "ASSOC" "clearline"]
 	Text[1180.00mil 1005.00mil 0 100 "Iowa Scaled Engineering" "clearline"]
 	Text[1440.00mil 1085.00mil 0 100 "MRBW-TH v3.0" "clearline"]
-	Text[500.00mil 1040.00mil 0 100 "CC BY-SA (C) 2018" "clearline"]
+	Text[500.00mil 1040.00mil 0 100 "CC BY-SA (C) 2019" "clearline"]
 	Text[675.00mil 1245.00mil 0 100 "+" "clearline"]
 	Text[1075.00mil 1245.00mil 0 100 "+" "clearline"]
 	Text[275.00mil 1245.00mil 0 100 "+" "clearline"]
