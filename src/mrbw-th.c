@@ -56,10 +56,37 @@ LICENSE:
 
 #define TH_EE_NUM_AVG          0x10
 
+#define MRBUS_TX_BUFFER_DEPTH 4
+#define MRBUS_RX_BUFFER_DEPTH 4
+
+MRBusPacket mrbusTxPktBufferArray[MRBUS_TX_BUFFER_DEPTH];
+MRBusPacket mrbusRxPktBufferArray[MRBUS_RX_BUFFER_DEPTH];
+
 uint8_t mrbus_dev_addr = 0;
 uint8_t th_state = TH_STATE_IDLE;
 uint8_t num_avg = 1;
 uint16_t pkt_period = 20;
+
+void enableExternal33()
+{
+	PORTC &= ~_BV(PC2);
+}
+
+void disableExternal33()
+{
+	PORTC |= _BV(PC2);
+}
+
+void enableXB3()
+{
+	PORTD &= ~_BV(PD7);
+}
+
+void disableXB3()
+{
+	PORTD |= _BV(PD7);
+}
+
 
 void PktHandler(void)
 {
@@ -218,355 +245,95 @@ ISR(ADC_vect)
 	}
 }
 
-#ifdef CPS150
+
+#ifdef SHT3X
 #include "avr-i2c-master.h"
 
-#define CPS150_I2C_ADDR        (0x28<<1)
+volatile uint8_t sht3x_read_countdown=0;
 
-#define CPS150_STATUS_DATA_VALID    0x00
-#define CPS150_STATUS_DATA_STALE    0x01
+#define SHT3X_I2C_ADDR        (0x44<<1)
 
-volatile uint8_t cps150_read_countdown=0;
+// Sensirion polynomial: x^8 + x^5 + x^4 + 1
+#define CRC_POLYNOMIAL 0x31
 
-void cps150_start_conversion()
+uint8_t sht3x_crc_calculate(uint16_t sensorVal)
 {
-    uint8_t msgBuf[2];
-	memset(msgBuf, 0, sizeof(msgBuf));    
-    msgBuf[0] = CPS150_I2C_ADDR;
-    msgBuf[1] = 0x00;
-    i2c_transmit(msgBuf, 1, 0);
-    while(i2c_busy());
-    cps150_read_countdown = 5;
-}
+	uint8_t crc = 0;
+	uint8_t bit;
 
-/* From the datasheet:
-An example of the 14-bit compensated pressure with a full scale range of 30 to 120kPa can be calculated as follows:
-Pressure [kPa] = (Pressure High Byte [5:0] x 256 + Pressure Low Byte [7:0]) / 2^14 x 90 + 30
+	crc ^= (sensorVal >> 8);
 
-The 14-bit compensated temperature can be calculated as follows:
-Temperature [°C] = (Temperature High Byte [7:0] x 64 + Temperature Low Byte [7:2] / 4) / 2^14 x 165 – 40
-
-*/
-
-uint8_t cps150_read_value(uint16_t* kelvinTemp, uint16_t* barometricPressure)
-{
-    uint8_t msgBuf[6];
-	uint16_t tmpVal=0;
-	memset(msgBuf, 0, sizeof(msgBuf));
-
-    msgBuf[0] = CPS150_I2C_ADDR + 0x01;  // Read address
-    i2c_transmit(msgBuf, 5, 0);
-	i2c_receive(msgBuf, 5);
-
-	/*
-	The mathematics of pressure conversion
-	The goal is an output in hectoPascals
-	Pkpa = [Pval] * (90 / 16384) + 30
-	// Multiply the constant by 4 so it's a divide by 2^16
-	Pkpa = [Pval] * (360 / 65536) + 30
-	// Multiply the top by 10 and the trailing constant offset by 10 to convert to hectoPascals from kiloPascals
-	Phpa = [Pval] * (3600 / 65536) + 300
-	*/
-	
-	tmpVal = ((((uint16_t)msgBuf[1]) & 0x3F)<<8) | ((uint16_t)msgBuf[2]);
-	*barometricPressure = (((((uint32_t)tmpVal) * 3600)>>16) & 0xFFFF) + 300;
-
-	//*barometricPressure = ((uint16_t)msgBuf[1])<<8 | (uint16_t)msgBuf[2];
-	
-
-	/*
-	The mathematics of temperature conversion
-	The goal is getting an output in 1/16ths of degrees Kelvin
-	Tc = [Tval] * (165 / 16384) - 40
-	// Multiply the constant by 4 so it's a divide by 2^16
-	Tc = [Tval] * (660 / 65536) - 40
-	// Multiply the top by 16 and the trailing constant offset by 16 to convert to 1/16th degrees C
-	T16c = [Tval] * (10560 / 65536) - 640
-	// Adjust the trailing constant to be in Kelvin rather than in C
-	T16k = [Tval] * (10560 / 65536) - 640 + 4370
-	T16k = [Tval] * (10560 / 65536) + 3730
-	*/
-
-	tmpVal = (((uint16_t)msgBuf[3])<<6) | ((((uint16_t)msgBuf[4])>>2) & 0x3F);
-	*kelvinTemp = (((((uint32_t)tmpVal) * 10560)>>16) & 0xFFFF) + 3730;
-
-	//*kelvinTemp = (((uint16_t)msgBuf[3])<<6) | (((uint16_t)msgBuf[4])>>2);
-		
-	return(msgBuf[0] & 0xC0);
-}
-
-#endif
-
-#ifdef HYT221
-#include "avr-i2c-master.h"
-
-#define HYT221_I2C_ADDR        (0x28<<1)
-
-#define HYT221_STATUS_DATA_VALID    0x00
-#define HYT221_STATUS_DATA_STALE    0x01
-
-volatile uint8_t hyt221_read_countdown=0;
-
-void hyt221_start_conversion()
-{
-    uint8_t msgBuf[2];
-	memset(msgBuf, 0, sizeof(msgBuf));    
-    msgBuf[0] = HYT221_I2C_ADDR;
-    msgBuf[1] = 0x00;
-    i2c_transmit(msgBuf, 1, 0);
-    while(i2c_busy());
-    hyt221_read_countdown = 5;
-}
-
-/* From the datasheet:
-An example of the 14-bit compensated pressure with a full scale range of 30 to 120kPa can be calculated as follows:
-Pressure [kPa] = (Pressure High Byte [5:0] x 256 + Pressure Low Byte [7:0]) / 2^14 x 90 + 30
-
-The 14-bit compensated temperature can be calculated as follows:
-
-Temperature [°C] = (Temperature High Byte [7:0] x 64 + Temperature Low Byte [7:2] / 4) / 2^14 x 165 – 40
-
-*/
-
-uint8_t hyt221_read_value(uint16_t* kelvinTemp, uint16_t* relativeHumidity)
-{
-    uint8_t msgBuf[6];
-	uint16_t tmpVal=0;
-	memset(msgBuf, 0, sizeof(msgBuf));
-
-    msgBuf[0] = HYT221_I2C_ADDR + 0x01;  // Read address
-    i2c_transmit(msgBuf, 5, 0);
-	i2c_receive(msgBuf, 5);
-
-	/*
-	The mathematics of pressure conversion
-	The goal is an output in hectoPascals
-	RH = [RHval] * (100 / 16384)
-	// Output is in 1/2 percent RH
-	RH*2 = [RHval] * (200 / 16384)	
-	*/
-	
-	tmpVal = ((((uint16_t)msgBuf[1]) & 0x3F)<<8) | ((uint16_t)msgBuf[2]);
-	*relativeHumidity = ((((uint32_t)tmpVal) * 200)>>14) & 0xFF;
-
-	/*
-	The mathematics of temperature conversion
-	The goal is getting an output in 1/16ths of degrees Kelvin
-	Tc = [Tval] * (165 / 16384) - 40
-	// Multiply the constant by 4 so it's a divide by 2^16
-	Tc = [Tval] * (660 / 65536) - 40
-	// Multiply the top by 16 and the trailing constant offset by 16 to convert to 1/16th degrees C
-	T16c = [Tval] * (10560 / 65536) - 640
-	// Adjust the trailing constant to be in Kelvin rather than in C
-	T16k = [Tval] * (10560 / 65536) - 640 + 4370
-	T16k = [Tval] * (10560 / 65536) + 3730
-	*/
-
-	tmpVal = (((uint16_t)msgBuf[3])<<6) | ((((uint16_t)msgBuf[4])>>2) & 0x3F);
-	*kelvinTemp = (((((uint32_t)tmpVal) * 10560)>>16) & 0xFFFF) + 3730;
-
-	//*kelvinTemp = (((uint16_t)msgBuf[3])<<6) | (((uint16_t)msgBuf[4])>>2);
-		
-	return(msgBuf[0] & 0xC0);
-}
-
-#endif
-
-
-
-
-#if defined TMP275 || TMP275EXT
-
-#include "avr-i2c-master.h"
-
-#define TMP275_PTR_TEMP_REG    0x00
-#define TMP275_PTR_CONFIG_REG  0x01
-#define TMP275_PTR_TEMP_L_REG  0x10
-#define TMP275_PTR_TEMP_H_REG  0x11
-
-volatile uint8_t tmp275_read_countdown=0;
-
-void tmp275_start_conversion(uint8_t addr)
-{
-    uint8_t msgBuf[3];
-    msgBuf[0] = addr;
-    msgBuf[1] = 0x01;
-    msgBuf[2] = 0xE1;
-    i2c_transmit(msgBuf, 3, 1);
-    while(i2c_busy());
-
-    tmp275_read_countdown = 3;
-}
-
-uint16_t tmp275_read_value(uint8_t addr)
-{
-    uint8_t msgBuf[4];
-    msgBuf[0] = addr;
-    msgBuf[1] = 0x00;
-    i2c_transmit(msgBuf, 2, 0);
-	while(i2c_busy());
-    msgBuf[0] = addr+1;
-    i2c_transmit(msgBuf, 3, 1);
-	i2c_receive(msgBuf, 3);
-
-	return((((uint16_t)msgBuf[1])<<4) | (0x0F & (msgBuf[2]>>4)));
-}
-
-#endif
-
-#if defined DHT11 || defined DHT22
-
-volatile uint8_t dht11_bitnum=0;
-volatile uint8_t dht11_data[5];
-volatile uint8_t dht11_read_complete=3;
-
-void initializeDHT11Timer()
-{
-	// Set up timer 1 for 100Hz interrupts
-	TCNT2 = 0;
-	OCR2A = 0xC2;
-	TCCR2A = 0;
-	TCCR2B = _BV(CS21);
-}
-
-ISR(PCINT1_vect)
-{
-	// This is used by the DHT11 code to read asynchronously to the main loop
-	if(!(PINC & _BV(PC3)))
+	for(bit=8; bit > 0; bit--)
 	{
-		uint8_t timerval = TCNT2;
-		// It was the falling edge.
-		// 26-28ms in the timer indicates that it's a 0, 70ms indicates a 1
-		// 0.7265625uS per count
-		// A logic zero will be between 27 and 48
-		// A logic one will be between 83 and 110
-		
-		TCNT2 = 0;
-		if (timerval > 70 && timerval < 120)
-		{
-			// It's a one, put one in the correct place
-			dht11_data[dht11_bitnum / 8] |= 1<<(7-(dht11_bitnum % 8));
-		
-		}
-		dht11_bitnum++;
-	}
-	else
-	{
-		// It's the rising edge, indicating that we're at the beginning of a clock period
-		// Reset the timer
-		TCNT2 = 0;
-		TIMSK2 |= _BV(TOIE2);
-	}
-
-	if(dht11_bitnum >= 40)
-	{
-		// Shut down the PCINT11 interrupt
-		PCIFR |= _BV(PCIF1);
-		PCICR &= ~_BV(PCIE1);
-		TIMSK2 &= ~_BV(TOIE2);
-
-		if ((dht11_data[0] + dht11_data[1] + dht11_data[2] + dht11_data[3]) == dht11_data[4])
-			// We're done, indicate complete and shut down the interrupt
-			dht11_read_complete = 1;
+		if (crc & 0x80)
+			*crc = (*crc << 1) ^ CRC_POLYNOMIAL;
 		else
-			dht11_read_complete = 2; // Indicate failure - checksums didn't match
-
+			*crc = (*crc << 1);
 	}
+
+	crc ^= (sensorVal & 0xFF);
+
+	for(bit=8; bit > 0; bit--)
+	{
+		if (crc & 0x80)
+			crc = (crc << 1) ^ CRC_POLYNOMIAL;
+		else
+			crc = (crc << 1);
+	}
+
+	return crc;
 }
 
-
-ISR(TIMER2_OVF_vect)
+void sht3x_start_conversion()
 {
-	// We overflowed, meaning the DHT11 stopped responding correctly
-	dht11_read_complete = 2;
-	// Shut down Timer 2
-	TIMSK2 &= ~_BV(TOIE2);
-	// Shut down the PCINT11 interrupt
-	PCIFR |= _BV(PCIF1);
-	PCICR &= ~_BV(PCIE1);
+	uint8_t msgBuf[3];
+	memset(msgBuf, 0, sizeof(msgBuf));    
+	msgBuf[0] = SHT3X_I2C_ADDR;
+	msgBuf[1] = 0x24; // No clock stretching
+	msgBuf[2] = 0x00; // High accuracy/repeatability
+	i2c_transmit(msgBuf, 1, 0);
+	while(i2c_busy());
+	sht3x_read_countdown = 2; // In 100mS increments
 }
 
-void dht11_start_conversion()
+uint8_t sht3x_read_value(float* kelvinTemp, uint16_t* relativeHumidity)
 {
-	uint8_t countdown = 20;
-	// Get triggery
-	// Set DHT11 data wire to ground for 20ms
+	uint8_t msgBuf[7];
+	uint16_t tmpVal=0;
+	uint8_t fail = 0;
+	memset(msgBuf, 0, sizeof(msgBuf));
 
-#ifdef DHT11
-	countdown = 20;
-#elif defined DHT22
-	countdown = 4;
-#endif
+	msgBuf[0] = SHT3X_I2C_ADDR | 0x01;  // Read address
+	i2c_transmit(msgBuf, 7, 0);
+	i2c_receive(msgBuf, 7);
 
-	initializeDHT11Timer();
-
-	dht11_bitnum=0;
-	memset((void*)dht11_data, 0, sizeof(dht11_data));
-	dht11_read_complete=0;
-	PORTC &= ~_BV(PC3);
-	DDRC |= _BV(PC3);
-	while (countdown-- != 0)
+	tmpVal = ((((uint16_t)msgBuf[1]))<<8) | ((uint16_t)msgBuf[2]);
+	if (msgBuf[3] == sht3x_crc_calculate(tmpVal))
 	{
-		_delay_ms(1);
-		if (mrbus_state & MRBUS_RX_PKT_READY)
-			PktHandler();			
-	}
-	
-	// Clear all the timer interrupts - chances are we've overflowed
-	//  since the last time we started
-	TCNT2 = 0;
-	TIFR2 |= 0x07;
-	// Clear the timer counter and enable the interrupt
-	TIMSK2 |= _BV(TOIE2);
-
-	DDRC &= ~_BV(PC3);
-	TCNT2 = 0;
-
-	// 20-40uS high after AVR releases the line
-	// Wait for the low for up to 186uS
-	while ((PINC & _BV(PC3)) && 0 == dht11_read_complete);
-	
-	// Failure, the DHT11 didn't respond, return
-	if (0 != dht11_read_complete)
-	{
-		dht11_read_complete = 0x42;
-		return;
+		// Checksum works out
+		// Tc = -45 + 175 * (Sensor / 65535)
+		*kelvinTemp = -45.0 + ( ((float)tmpVal) / (65535.0 / 175.0) );
+	} else {
+		*kelvinTemp = 0;
+		fail |= 0x01;
 	}
 
-	TCNT2 = 0;
-	// After going high for 20-40uS, the DHT11 should pull it low 
-	// for 80uS, then high again for 80uS
-	// Wait up to 186 uS for the high.
-	while (!(PINC & _BV(PC3)) && 0 == dht11_read_complete);
-
-	// Failure, the DHT11 didn't respond, return
-	if (0 != dht11_bitnum)
+	tmpVal = ((((uint16_t)msgBuf[4]))<<8) | ((uint16_t)msgBuf[5]);
+	if (msgBuf[6] == sht3x_crc_calculate(tmpVal))
 	{
-		dht11_read_complete = 0x62;
-		return;
+		// Checksum works out
+		// RH = 100 * (Sensor / 65535)
+		*relativeHumidity = (float)(tmpVal) / 655.35);
+	} else {
+		*relativeHumidity = 0;
+		fail |= 0x02;
 	}
-
-	// 20-40uS high after AVR releases the line
-	// Wait for the low for up to 186uS
-	TCNT2 = 0;
-	while ((PINC & _BV(PC3)) && 0 == dht11_read_complete);
-
-	TCNT2 = 0;
-	// Failure, the DHT11 didn't respond, return
-	if (0 != dht11_read_complete)
-	{
-		dht11_read_complete = 0x82;
-		return;
-	}
-
-	// If we're here, we're on the low ahead of the first bit.  
-	// Enable pin change interrupt and go!
-	PCMSK1 = _BV(PCINT11);
-	PCIFR |= _BV(PCIF1);
-	PCICR |= _BV(PCIE1);
+		
+	return(fail);
 }
 
 #endif
+
 
 #ifdef LOWPOWER
 
@@ -634,7 +401,7 @@ uint16_t system_sleep(uint16_t sleep_decisecs)
 		WDTCSR |= _BV(WDE) | _BV(WDCE);
 		WDTCSR = wdtcsr_bits;
 
-        sei();
+		sei();
 
 		wdt_tripped = 0;
 		// Wrap this in a loop, so we go back to sleep unless the WDT woke us up
@@ -700,21 +467,10 @@ ISR(TIMER0_COMPA_vect)
 		ticks = 0;
 		decisecs++;
 
-#ifdef CPS150
-		if (cps150_read_countdown)
-			cps150_read_countdown--;
+#ifdef SHT3X
+		if (sht3x_read_countdown)
+			sht3x_read_countdown--;
 #endif
-
-#ifdef HYT221
-		if (hyt221_read_countdown)
-			hyt221_read_countdown--;
-#endif
-
-#if defined TMP275 || TMP275EXT
-		if (tmp275_read_countdown)
-			tmp275_read_countdown--;
-#endif	
-
 	}
 }
 
@@ -725,7 +481,7 @@ ISR(TIMER0_COMPA_vect)
 void init(void)
 {
 	// Kill watchdog
-    MCUSR = 0;
+	MCUSR = 0;
 #ifdef ENABLE_WATCHDOG
 	// If you don't want the watchdog to do system reset, remove this chunk of code
 	wdt_reset();
@@ -744,27 +500,26 @@ void init(void)
 	DDRB = 0;
 	PORTB = 0xFF;
 
-	DDRC = _BV(PC3);	
+	DDRC = _BV(PC2); // External 3.3V enable pin	
 	PORTC = 0xFF;
 
-	DDRC |= _BV(PC2);
-
 	ACSR = _BV(ACD);
-#if defined TMP275 || TMP275EXT || defined CPS150 || defined HYT221
+#if defined SHT3X
 	i2c_master_init();
 #endif
 	
 	// Initialize MRBus address from EEPROM address 1
 	mrbus_dev_addr = eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_ADDR);
 
+	mrbusPktQueueInitialize(&mrbeeTxQueue, mrbusTxPktBufferArray, MRBUS_TX_BUFFER_DEPTH);
+	mrbusPktQueueInitialize(&mrbeeRxQueue, mrbusRxPktBufferArray, MRBUS_RX_BUFFER_DEPTH);
+	mrbeeInit();
+
 	// Initialize MRBus packet update interval from EEPROM
 	pkt_period = ((eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_UPDATE_H) << 8) & 0xFF00) | (eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_UPDATE_L) & 0x00FF);
-#if defined DHT11 || defined DHT22
-	pkt_period = max(pkt_period, 20);
-#endif
 
 	// Initialize averaging value from EEPROM
-#if defined DHT11 || defined DHT22 || defined TMP275 || TMP275EXT || defined CPS150 || defined HYT221
+#if defined SHT3X
 	num_avg = 1;
 #else
 	num_avg = eeprom_read_byte((uint8_t*)TH_EE_NUM_AVG);
@@ -775,24 +530,18 @@ void init(void)
 	ADCSRA = _BV(ADATE) | _BV(ADIF) | _BV(ADPS2) | _BV(ADPS1); // 128 prescaler
 	ADCSRB = 0x00;
 	DIDR0  = 0x00;  // No digitals were harmed in the making of this ADC
+
+	disableExternal33();
 }
 
 
 int main(void)
 {
 	uint16_t kelvinTemp = 4370; // Expressed in 1/16ths K, base of 273.15 K
-#if defined TMP275EXT
-	uint16_t kelvinTempExt[7] = {[0 ... 6] = 4370}; // Expressed in 1/16ths K, base of 273.15 K
-#endif
 	uint16_t relHumidity = 0; // Expressed in 1/10ths % RH
 	uint16_t barometricPressure = 0;
 	uint8_t count=0;
-#if defined DHT11 || defined DHT22
-	uint8_t dht11_powerup_lockout = 1;
-#else
-	uint8_t dht11_powerup_lockout = 0;
-#endif
-        uint16_t decisecs_snapshot;
+	uint16_t decisecs_snapshot;
 
 	// Application initialization
 	init();
@@ -818,312 +567,181 @@ int main(void)
 	while (1)
 	{
 		wdt_reset();
-#ifdef MRBEE
 		mrbeePoll();
-#endif
-
 
 		// Handle any packets that may have come in
 		if (mrbus_state & MRBUS_RX_PKT_READY)
 			PktHandler();
 
-		// Notes of warning - DANGER, WILL ROBINSON!  DANGER!
-		// DHT11/DHT22/RHT03 must *NOT* be accessed within the first second of being powered up
-		// DHT11/DHT22/RHT03 must *NOT* be read more than once every 2 seconds
-		// Both of these restrictions come from the datasheet
-
-		if (dht11_powerup_lockout && decisecs > 12)
+		switch(th_state)
 		{
-			dht11_powerup_lockout = 0;
-			th_state = TH_STATE_TRIGGER;
-                }
-
-		if ((TH_STATE_IDLE == th_state) && (decisecs >= pkt_period) && !dht11_powerup_lockout)
-		{
-			th_state = TH_STATE_TRIGGER;
-			count = 0;
-			decisecs = 0;
-		}
-		else if (TH_STATE_TRIGGER == th_state)
-		{
-#if defined DHT11 || defined DHT22
-			dht11_start_conversion();
-			PORTC |= _BV(PC5);
-#elif defined TMP275
-			tmp275_start_conversion(0x9E);
-#elif defined TMP275EXT
-			uint8_t tmp275_addr;
-			for(tmp275_addr = 0x90; tmp275_addr < 0x9F; tmp275_addr += 2)
-			{
-				tmp275_start_conversion(tmp275_addr);
-			}
-#elif defined CPS150
-			cps150_start_conversion();
-#elif defined HYT221
-			hyt221_start_conversion();
-#elif defined DUMMY_SENSOR
-			// Do nothing
-#endif
-			// Trigger an ADC conversion
-			busVoltage = 0;
-			busVoltageCount = 0;
-			ADCSRA |= _BV(ADEN) | _BV(ADSC) | _BV(ADIE) | _BV(ADIF);
-			th_state = TH_STATE_WAIT;
-		}
-		else if (TH_STATE_WAIT == th_state)
-		{
-			uint8_t conversionComplete = 0;
-
-#if defined DHT11 || defined DHT22
-			if (dht11_read_complete)
-				conversionComplete = 1;
-#elif defined TMP275 || TMP275EXT
-			if (0 == tmp275_read_countdown)
-				conversionComplete = 1;
-#elif defined CPS150
-			if (0 == cps150_read_countdown)
-				conversionComplete = 1;
-#elif defined HYT221
-			if (0 == hyt221_read_countdown)
-				conversionComplete = 1;
-#elif defined DUMMY_SENSOR
-			// Just wait a while
-			_delay_us(200);
-			conversionComplete = 1;
-#endif
-			if (conversionComplete && !(ADCSRA & _BV(ADEN)) )
-			{
-				PORTC &= ~_BV(PC5);
-				th_state = TH_STATE_READ;
-			}
-		}
-		else if (TH_STATE_READ == th_state)
-		{
-			uint16_t temp;
-			
-			kelvinTemp = 4370; // Expressed in 1/16ths K, base of 273.15 K
-#if defined TMP275EXT
-			kelvinTempExt[0] = 4370;
-			kelvinTempExt[1] = 4370;
-			kelvinTempExt[2] = 4370;
-			kelvinTempExt[3] = 4370;
-			kelvinTempExt[4] = 4370;
-			kelvinTempExt[5] = 4370;
-			kelvinTempExt[6] = 4370;
-#endif
-
-			relHumidity = 0; // Expressed in 1/10ths % RH		
-
-
-			// This is where things get ugly
-			// For the DHT11 data bytes:
-			//   0: integer humidity %
-			//   1: unused, reads as 0
-			//   2: integer temperature in C, (high bit indicates negative temp)
-			//   3: unused, reads as 0
-			//   4: checksum (literally a sum of the first four bytes)
-			// For the DHT22/RHT03 data bytes:
-			//   0: high 8 bits of humidity, in 1/10ths of %
-			//   1: low 8 bits of humidity, in 1/10ths of %
-			//   2: high 8 bits of temp in C, in 1/10ths of degrees (high bit indicates negative temp)
-			//   3: low 8 bits of temp in C, in 1/10ths of degrees
-			//   4: checksum (literally a sum of the first four bytes)
-			// There's no systemic way to tell these things apart, so we have to be configured one way or the other
-
-#ifdef DHT11
-			relHumidity = (uint16_t)dht11_data[0] * 2;
-			temp = (uint16_t)(dht11_data[2] & 0x7F);
-			temp <<= 4;
-			if (dht11_data[2] & 0x80)
-				kelvinTemp -= temp;
-			else
-				kelvinTemp += temp;
-
-#elif defined DHT22
-			relHumidity = (((uint16_t)dht11_data[0])<<8) + (uint16_t)dht11_data[1];
-			temp = ((uint16_t)((dht11_data[2] & 0x7F))<<8)+(uint16_t)dht11_data[3];
-			temp *= 8;
-			temp /= 5;
-			
-			relHumidity /= 5;
-			
-			if (dht11_data[2] & 0x80)
-				kelvinTemp -= temp;
-			else
-				kelvinTemp += temp;
-#elif defined TMP275
-			temp = tmp275_read_value(0x9E);
-			// Sign extend the 12 bit result
-			if (temp & 0x0800)
-				temp |= 0xF000;
-			kelvinTemp += temp;
-
-#elif defined TMP275EXT
-			temp = tmp275_read_value(0x9E);
-			// Sign extend the 12 bit result
-			if (temp & 0x0800)
-				temp |= 0xF000;
-			kelvinTemp += temp;
-
-			uint8_t tmp275_addr, i=0;
-			for(tmp275_addr = 0x90; tmp275_addr < 0x9D; tmp275_addr += 2)
-			{
-				temp = tmp275_read_value(tmp275_addr);
-				// Sign extend the 12 bit result
-				if (temp & 0x0800)
-					temp |= 0xF000;
-				kelvinTempExt[i++] += temp;
-			}
-
-#elif defined CPS150
-			cps150_read_value(&kelvinTemp, &barometricPressure);
-
-#elif defined HYT221
-			hyt221_read_value(&kelvinTemp, &relHumidity);
-
-#elif defined DUMMY_SENSOR
-			// Tada!  Both the temperature and humity are going to be 42
-			kelvinTemp = 42;
-			relHumidity = 42;
-#endif
-			// Div by 8, as we use 8 samples
-			busVoltage = busVoltage >> 3;  
-
-			if(++count >= num_avg)
-			{
-				th_state = TH_STATE_SEND_PACKET;
-				count = 0;
-			} else {
-				th_state = TH_STATE_TRIGGER;
-			}
-		}
-		else if(th_state == TH_STATE_SEND_PACKET)
-		{
-			mrbus_tx_buffer[MRBUS_PKT_SRC] = mrbus_dev_addr;
-			mrbus_tx_buffer[MRBUS_PKT_DEST] = 0xFF;
-			mrbus_tx_buffer[MRBUS_PKT_LEN] = 11;
-			mrbus_tx_buffer[5] = 'S';
-			mrbus_tx_buffer[6] = 0;  // Status byte.  Lower three bits are sensor type, 000 = DHT11/DHT22/RHT03
-			mrbus_tx_buffer[7] = (kelvinTemp >> 8);
-			mrbus_tx_buffer[8] = kelvinTemp & 0xff;
-			mrbus_tx_buffer[9] = relHumidity & 0xff;
-			mrbus_tx_buffer[10] = (VINDIV * VDD * (uint32_t)busVoltage) / 1024;  // VINDIV is reciprocal of VIN divider ratio.  VDD is in decivolts
-#ifdef CPS150
-			mrbus_tx_buffer[11] = (barometricPressure >> 8);
-			mrbus_tx_buffer[12] = barometricPressure & 0xff;
-#endif
-#ifdef TMP275EXT
-			mrbus_tx_buffer[9]  = (kelvinTempExt[0] >> 8);
-			mrbus_tx_buffer[10] = kelvinTempExt[0] & 0xff;
-			mrbus_tx_buffer[11] = (kelvinTempExt[1] >> 8);
-			mrbus_tx_buffer[12] = kelvinTempExt[1] & 0xff;
-			mrbus_tx_buffer[13] = (kelvinTempExt[2] >> 8);
-			mrbus_tx_buffer[14] = kelvinTempExt[2] & 0xff;
-			mrbus_tx_buffer[15] = (kelvinTempExt[3] >> 8);
-			mrbus_tx_buffer[16] = kelvinTempExt[3] & 0xff;
-			mrbus_tx_buffer[17] = (kelvinTempExt[4] >> 8);
-			mrbus_tx_buffer[18] = kelvinTempExt[4] & 0xff;
-			mrbus_tx_buffer[19] = (uint8_t)busVoltage;
-			mrbus_tx_buffer[MRBUS_PKT_LEN] = 20;
-#endif
-
-			mrbus_state |= MRBUS_TX_PKT_READY;
-
-#ifdef LOWPOWER
-			th_state = TH_STATE_XMIT_WAIT;
-#else
-			th_state = TH_STATE_IDLE;
-#endif
-		}
-
-
-#ifdef LOWPOWER
-		if (TH_STATE_XMIT_WAIT == th_state 
-			&& !(mrbus_state & (MRBUS_TX_BUF_ACTIVE | MRBUS_TX_PKT_READY)))
-		{
-			uint8_t i=0;
-			// FIXME: this is crap
-			// Need to actually see when we're done sending out of the XBEE
-			// Also, do this as a loop, in case we're on a short watchdog
-			for (i=0; i<25; i++)
-			{
-				wdt_reset();							
-				_delay_ms(10);
-			}
-			
-			// Grab snapshot of decisecs to make sure it doesn't advance between
-			// the comparison and the subtraction, causing a "negative" sleep value.
-			decisecs_snapshot = decisecs;
-                        if(decisecs_snapshot < pkt_period)
-                        {
-                            // Not yet at pkt_period, sleep for remaining time
-                            decisecs += system_sleep(pkt_period - decisecs_snapshot);
-                        }
-			th_state = TH_STATE_WAKE;
-		}
-		
-		if (TH_STATE_WAKE == th_state)
-		{
-			// FIXME:  Do wakeup stuff
-			th_state = TH_STATE_IDLE;		
-		}
-		
-#endif
-
-		// If we have a packet to be transmitted, try to send it here
-		while(mrbus_state & MRBUS_TX_PKT_READY)
-		{
-#ifndef MRBEE
-                        uint8_t bus_countdown;
-#endif
-                        
-			// Even while we're sitting here trying to transmit, keep handling
-			// any packets we're receiving so that we keep up with the current state of the
-			// bus.  Obviously things that request a response cannot go, since the transmit
-			// buffer is full.
-			if (mrbus_state & MRBUS_RX_PKT_READY)
-				PktHandler();
-
-#ifdef MRBEE
-            // Unsleep the XBee
-            PORTD &= ~_BV(PD7);
-#endif
-
-            // XBee ISR waits for XBee to start by watching for /CTS to assert low
-            // Assuming XBEE_IGNORE_FLOW *not* defined
-
-			if (0 == mrbusPacketTransmit())
-			{
-				mrbus_state &= ~(MRBUS_TX_PKT_READY);
+			case TH_STATE_IDLE:
+				ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
+				{
+					if (decisecs >= pkt_period)
+					{
+						th_state = TH_STATE_TRIGGER;
+						count = 0;
+						decisecs = 0;
+					}
+				}
 				break;
-			}
 
-#ifndef MRBEE
-			// If we're here, we failed to start transmission due to somebody else transmitting
-			// Given that our transmit buffer is full, priority one should be getting that data onto
-			// the bus so we can start using our tx buffer again.  So we stay in the while loop, trying
-			// to get bus time.
+			case TH_STATE_TRIGGER:
+	#if defined SHT3X
+				sht3x_start_conversion();
+	#elif defined DUMMY_SENSOR
+				// Do nothing
+	#endif
+				// Trigger an ADC conversion
+				busVoltage = 0;
+				busVoltageCount = 0;
+				ADCSRA |= _BV(ADEN) | _BV(ADSC) | _BV(ADIE) | _BV(ADIF);
+				th_state = TH_STATE_WAIT;
+				break;
 
-			// We want to wait 20ms before we try a retransmit
-			// Because MRBus has a minimum packet size of 6 bytes @ 57.6kbps,
-			// need to check roughly every millisecond to see if we have a new packet
-			// so that we don't miss things we're receiving while waiting to transmit
-			bus_countdown = 20;
-			while (bus_countdown-- > 0 && MRBUS_ACTIVITY_RX_COMPLETE != mrbus_activity)
-			{
-				//clrwdt();
-				_delay_ms(1);
-				if (mrbus_state & MRBUS_RX_PKT_READY) 
-					PktHandler();
-			}
+			case TH_STATE_WAIT:
+				{
+					uint8_t conversionComplete = 0;
+
+#elif defined SHT3X
+					if (0 == sht3x_read_countdown)
+						conversionComplete = 1;
+#elif defined DUMMY_SENSOR
+					// Just wait a while
+					_delay_us(200);
+					conversionComplete = 1;
 #endif
+					if (conversionComplete && !(ADCSRA & _BV(ADEN)) )
+					{
+						PORTC &= ~_BV(PC5);
+						th_state = TH_STATE_READ;
+					}
+				}
+				break;
+
+			case TH_STATE_READ:
+				{
+					uint16_t temp;
+					
+					relHumidity = 0; // Expressed in 1/10ths % RH		
+
+		#if defined SHT3X
+					sht3x_read_value(&kelvinTemp, &relHumidity);
+		#elif defined DUMMY_SENSOR
+					// Tada!  Both the temperature and humity are going to be 42
+					kelvinTemp = 42;
+					relHumidity = 42;
+		#endif
+					// Div by 8, as we use 8 samples
+					busVoltage = busVoltage >> 3;  
+
+					if(++count >= num_avg)
+					{
+						th_state = TH_STATE_SEND_PACKET;
+						count = 0;
+					} else {
+						th_state = TH_STATE_TRIGGER;
+					}
+				}
+				break;
+
+			case TH_STATE_SEND_PACKET:
+				{
+					uint8_t mrbusTxBuffer[MRBUS_BUFFER_SIZE];
+					memset(mrbusTxBuffer, 0, sizeof(mrbusTxBuffer));
+
+					mrbusTxBuffer[MRBUS_PKT_SRC] = mrbus_dev_addr;
+					mrbusTxBuffer[MRBUS_PKT_DEST] = 0xFF;
+					mrbusTxBuffer[MRBUS_PKT_LEN] = 12;
+					mrbusTxBuffer[5] = 'S';
+					mrbusTxBuffer[6] = 0;  // Status byte.  Lower three bits are sensor type, 000 = DHT11/DHT22/RHT03
+					mrbusTxBuffer[7] = (kelvinTemp >> 8);
+					mrbusTxBuffer[8] = kelvinTemp & 0xff;
+					mrbusTxBuffer[9] = (relHumidity >> 8);
+					mrbusTxBuffer[10] = relHumidity & 0xff;
+					mrbusTxBuffer[11] = (VINDIV * VDD * (uint32_t)busVoltage) / 1024;  // VINDIV is reciprocal of VIN divider ratio.  VDD is in decivolts
+
+					mrbusPktQueuePush(&mrbeeTxQueue, mrbusTxBuffer, mrbusTxBuffer[MRBUS_PKT_LEN]);
+				}
+#ifdef LOWPOWER
+				th_state = TH_STATE_XMIT_WAIT;
+#else
+				th_state = TH_STATE_IDLE;
+#endif
+				break;
+
+
+			case TH_STATE_XMIT_WAIT:
+				if (TH_STATE_XMIT_WAIT == th_state 
+					&& !(mrbus_state & (MRBUS_TX_BUF_ACTIVE | MRBUS_TX_PKT_READY)))
+				{
+					uint8_t i=0;
+					// FIXME: this is crap
+					// Need to actually see when we're done sending out of the XBEE
+					// Also, do this as a loop, in case we're on a short watchdog
+					for (i=0; i<25; i++)
+					{
+						wdt_reset();							
+						_delay_ms(10);
+					}
+					
+					// Grab snapshot of decisecs to make sure it doesn't advance between
+					// the comparison and the subtraction, causing a "negative" sleep value.
+					ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
+					{
+						decisecs_snapshot = decisecs;
+					}
+
+					if(decisecs_snapshot < pkt_period)
+					{
+						// Not yet at pkt_period, sleep for remaining time
+						decisecs += system_sleep(pkt_period - decisecs_snapshot);
+					}
+
+					th_state = TH_STATE_WAKE;
+				}
+				break;
+
+			case TH_STATE_WAKE:
+				// FIXME:  Do wakeup stuff
+				th_state = TH_STATE_IDLE;		
+				break;
+
+			default:
+				// No idea why we're here, go back to idle
+				th_state = TH_STATE_IDLE;
+				break;
 		}
-#ifdef MRBEE
-        // Wait for XBee TX ISR to finish
-        do {wdt_reset();} while (bit_is_set(UCSR0B, UDRIE0));
-        // Sleep the XBee
-        PORTD |= _BV(PD7);
-#endif
+
+
+		// Handle any MRBus packets that may have come in
+		if (mrbusPktQueueDepth(&mrbeeRxQueue))
+		{
+			PktHandler();
+		}
+
+		// Transmit any pending MRBus packets
+		while (mrbusPktQueueDepth(&mrbeeTxQueue))
+		{
+			// Unsleep the XBee
+			enableXB3();
+			wdt_reset();
+			mrbeeTransmit();
+		}
+
+		// Wait for XBee TX ISR to finish
+		do {wdt_reset();} while (bit_is_set(UCSR0B, UDRIE0));
+
+		// Handle any MRBus packets that may have come in
+		if (mrbusPktQueueDepth(&mrbeeRxQueue))
+		{
+			PktHandler();
+		}
+
+
+		// Sleep the XBee
+		disableXB3();
 	}
 }
 
