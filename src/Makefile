@@ -27,8 +27,16 @@
 
 BASE_NAME = mrbw-th
 
-# ATmega48P 11.0592MHz @ 3.3V
-DEVICE  = atmega48p
+#PROGRAMMER_TYPE=avrispmkii
+#PROGRAMMER_TYPE=usbtiny
+PROGRAMMER_TYPE=iseavrprog
+PROGRAMMER_PORT=usb
+
+MRBUS_LIB=./mrbus/src/
+I2C_LIB=./avr-i2c/
+
+# ATmega328P 11.0592MHz @ 3.3V
+DEVICE  = atmega328p
 F_CPU   = 11059200  # Hz
 FUSE_L  = 0xD7
 FUSE_H  = 0xD5
@@ -37,64 +45,35 @@ FUSE_E  = 0x00
 VDD     = 33   # Voltage in decivolts
 VINDIV  = 1    # Reciprocal of VIN divider ratio
 
-# ATmega328 11.0592MHz @ 5.0V
-#DEVICE  = atmega328
-#F_CPU   = 11059200  # Hz
-#FUSE_L  = 0xD7
-#FUSE_H  = 0xD1
-#FUSE_E  = 0x04
-## 5.0V with 12V using 78L05
-#VDD     = 50   # Voltage in decivolts
-#VINDIV  = 6    # Reciprocal of VIN divider ratio
-
-# ATmega328P 11.0592MHz @ 3.3V
-#DEVICE  = atmega328p
-#F_CPU   = 11059200  # Hz
-#FUSE_L  = 0xD7
-#FUSE_H  = 0xD1
-#FUSE_E  = 0x05
-## 3.3V with AA-cell using 3528
-#VDD     = 33   # Voltage in decivolts
-#VINDIV  = 1    # Reciprocal of VIN divider ratio
-
+#GITREV := $(shell git rev-parse --short=6 HEAD)
+#REV    := $(shell ./git-revision.sh)
 
 # Define the sensor type used on the board.
 # Options are:
-#  DHT11
-#  DHT22 (works for the RHT03 as well)
-#  TMP275
-#  CPS150 - Concensic CPS150 temperature / pressure
+#  SHT3X - Sensirion SHT3x series
 #  DUMMY_SENSOR (for power consumption testing only)
-SENSOR=HYT221
-#SENSOR=CPS150
-#SENSOR=DUMMY_SENSOR
-#SENSOR=DHT22
-#SENSOR=TMP275
-SENSOR2=TMP275EXT
-
-
-# MRBus
-#DEFINES = -DMRBUS -DSWREV=0 -DHWREV_MAJOR=1 -DHWREV_MINOR=0
-#SRCS = $(BASE_NAME).c ../../mrbus/src/mrbus-avr.c ../../mrbus/src/mrbus-crc.c
-#INCS = ../../mrbus/src/mrbus.h ../../mrbus/src/mrbus-avr.h
+SENSOR=SHT3X
 
 # MRBee
-DEFINES = -DMRBEE -DMRBEE_BAUD=115200 -DLOWPOWER -DENABLE_WATCHDOG -DSWREV=0 -DHWREV_MAJOR=1 -DHWREV_MINOR=0
-SRCS = $(BASE_NAME).c ../../mrbus/src/mrbus-crc.c ../../mrbee/src/mrbee.c ../../mrbee/src/xbee.c ../../libs/avr-i2c/avr-i2c-master.c
-INCS = ../../mrbus/src/mrbus.h ../../mrbee/src/mrbee.h ../../mrbee/src/xbee.h ../../libs/avr-i2c/avr-i2c-master.h
+MRBEE_DEFINES = -DMRBEE -DMRBEE_IGNORE_FLOW
+MRBEE_PINS = 
 
-AVRDUDE = avrdude -c usbtiny -p $(DEVICE) -B1
+# -DGIT_REV=0x$(GITREV)L -D'VERSION_STRING="$(REV)"'
+DEFINES := -DF_CPU=$(F_CPU)  -DLOWPOWER -DENABLE_WATCHDOG -DWATCHDOG_TIMEOUT=WDTO_1S -DHWREV_MAJOR=1 -DHWREV_MINOR=2 $(MRBEE_DEFINES) $(MRBEE_PINS)
+SRCS = $(BASE_NAME).c $(MRBUS_LIB)/mrbee-avr.c $(MRBUS_LIB)/mrbus-crc.c $(MRBUS_LIB)/mrbus-queue.c $(I2C_LIB)/avr-i2c-master.c
+INCS = $(MRBUS_LIB)/mrbee.h $(MRBUS_LIB)/mrbee-avr.h $(I2C_LIB)/avr-i2c-master.h
+
+AVRDUDE = avrdude -P $(PROGRAMMER_PORT) -c $(PROGRAMMER_TYPE) -p $(DEVICE) -B1
+AVRDUDE_SLOW = avrdude -P $(PROGRAMMER_PORT) -c $(PROGRAMMER_TYPE) -p $(DEVICE) -B32
 
 OBJS = ${SRCS:.c=.o}
-INCLUDES = -I. -I../../mrbus/src -I../../mrbee/src -I../../libs/avr-i2c/
+INCLUDES = -I. -I$(MRBUS_LIB) -I$(I2C_LIB)
 CFLAGS  = $(INCLUDES) -Wall -Os -ffunction-sections -Wl,-gc-sections
 
-COMPILE = avr-gcc $(DEFINES) -D$(SENSOR) -D$(SENSOR2) -DF_CPU=$(F_CPU) -DVDD=$(VDD) -DVINDIV=$(VINDIV) $(CFLAGS) -mmcu=$(DEVICE)
-
-# -E -dM options preprocess only and output results of #define
-#COMPILE = avr-gcc -Wall -Os -DF_CPU=$(F_CPU) $(CFLAGS) -mmcu=$(DEVICE) -E -dM
+COMPILE = avr-gcc $(DEFINES) -D$(SENSOR) -DVDD=$(VDD) -DVINDIV=$(VINDIV) $(CFLAGS) -mmcu=$(DEVICE)
 
 help:
+	@echo "make setup...... init/update git submodules"
 	@echo "make hex ....... build $(BASE_NAME).hex"
 	@echo "make flash ..... flash the firmware"
 	@echo "make fuse ...... flash the fuses"
@@ -102,16 +81,24 @@ help:
 	@echo "make read ...... read the fuses"
 	@echo "make clean ..... delete objects and hex file"
 	@echo "make release.... produce release tarball"
+	@echo "make terminal... open up avrdude terminal"
 
 hex: $(BASE_NAME).hex
 
+setup:
+	git submodule init
+	git submodule update
+
 program: fuse flash
+
+terminal:
+	$(AVRDUDE_SLOW) -t
 
 # rule for programming fuse bits:
 fuse:
 	@[ "$(FUSE_H)" != "" -a "$(FUSE_L)" != "" -a "$(FUSE_E)" != "" ] || \
 		{ echo "*** Invalid Fuse values."; exit 1; }
-	$(AVRDUDE) -U hfuse:w:$(FUSE_H):m -U lfuse:w:$(FUSE_L):m -U efuse:w:$(FUSE_E):m
+	$(AVRDUDE_SLOW) -U hfuse:w:$(FUSE_H):m -U lfuse:w:$(FUSE_L):m -U efuse:w:$(FUSE_E):m
 
 read:
 	$(AVRDUDE) -v

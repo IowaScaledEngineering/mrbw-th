@@ -31,20 +31,7 @@ LICENSE:
 
 #include "mrbus.h"
 
-#ifdef MRBEE
-// If wireless, redefine the common variables and functions
 #include "mrbee.h"
-#define mrbus_rx_buffer mrbee_rx_buffer
-#define mrbus_tx_buffer mrbee_tx_buffer
-#define mrbus_state mrbee_state
-#define mrbux_rx_buffer mrbee_rx_buffer
-#define mrbus_tx_buffer mrbee_tx_buffer
-#define mrbus_state mrbee_state
-#define mrbusInit mrbeeInit
-#define mrbusPacketTransmit mrbeePacketTransmit
-#endif
-
-
 
 #define TH_STATE_IDLE          0x00
 #define TH_STATE_TRIGGER       0x10 
@@ -88,27 +75,46 @@ void disableXB3()
 }
 
 
+void createVersionPacket(uint8_t destAddr, uint8_t *buf)
+{
+	buf[MRBUS_PKT_DEST] = destAddr;
+	buf[MRBUS_PKT_SRC] = mrbus_dev_addr;
+	buf[MRBUS_PKT_LEN] = 9;
+	buf[MRBUS_PKT_TYPE] = 'v';
+	// Software Revision
+	buf[6]  = 'T';
+	buf[7]  = 'H'; // Software Revision
+	buf[8]  = '3';
+}
+
+
 void PktHandler(void)
 {
 	uint16_t crc = 0;
 	uint8_t i;
+	uint8_t rxBuffer[MRBUS_BUFFER_SIZE];
+	uint8_t txBuffer[MRBUS_BUFFER_SIZE];
+	uint8_t rssi;
+
+	if (0 == mrbeePktQueuePop(&mrbeeRxQueue, rxBuffer, sizeof(rxBuffer), &rssi))
+		return;
 
 	//*************** PACKET FILTER ***************
 	// Loopback Test - did we send it?  If so, we probably want to ignore it
-	if (mrbus_rx_buffer[MRBUS_PKT_SRC] == mrbus_dev_addr) 
+	if (rxBuffer[MRBUS_PKT_SRC] == mrbus_dev_addr) 
 		goto	PktIgnore;
 
 	// Destination Test - is this for us or broadcast?  If not, ignore
-	if (0xFF != mrbus_rx_buffer[MRBUS_PKT_DEST] && mrbus_dev_addr != mrbus_rx_buffer[MRBUS_PKT_DEST]) 
+	if (0xFF != rxBuffer[MRBUS_PKT_DEST] && mrbus_dev_addr != rxBuffer[MRBUS_PKT_DEST]) 
 		goto	PktIgnore;
 	
 	// CRC16 Test - is the packet intact?
-	for(i=0; i<mrbus_rx_buffer[MRBUS_PKT_LEN]; i++)
+	for(i=0; i<rxBuffer[MRBUS_PKT_LEN]; i++)
 	{
 		if ((i != MRBUS_PKT_CRC_H) && (i != MRBUS_PKT_CRC_L)) 
-			crc = mrbusCRC16Update(crc, mrbus_rx_buffer[i]);
+			crc = mrbusCRC16Update(crc, rxBuffer[i]);
 	}
-	if ((UINT16_HIGH_BYTE(crc) != mrbus_rx_buffer[MRBUS_PKT_CRC_H]) || (UINT16_LOW_BYTE(crc) != mrbus_rx_buffer[MRBUS_PKT_CRC_L]))
+	if ((UINT16_HIGH_BYTE(crc) != rxBuffer[MRBUS_PKT_CRC_H]) || (UINT16_LOW_BYTE(crc) != rxBuffer[MRBUS_PKT_CRC_L]))
 		goto	PktIgnore;
 		
 	//*************** END PACKET FILTER ***************
@@ -128,81 +134,58 @@ void PktHandler(void)
 	// should be sent out of the main loop so that they don't step on things in
 	// the transmit buffer
 	
-	if ('A' == mrbus_rx_buffer[MRBUS_PKT_TYPE])
+	if ('A' == rxBuffer[MRBUS_PKT_TYPE])
 	{
 		// PING packet
-		mrbus_tx_buffer[MRBUS_PKT_DEST] = mrbus_rx_buffer[MRBUS_PKT_SRC];
-		mrbus_tx_buffer[MRBUS_PKT_SRC] = mrbus_dev_addr;
-		mrbus_tx_buffer[MRBUS_PKT_LEN] = 6;
-		mrbus_tx_buffer[MRBUS_PKT_TYPE] = 'a';
-		mrbus_state |= MRBUS_TX_PKT_READY;
+		txBuffer[MRBUS_PKT_DEST] = rxBuffer[MRBUS_PKT_SRC];
+		txBuffer[MRBUS_PKT_SRC] = mrbus_dev_addr;
+		txBuffer[MRBUS_PKT_LEN] = 6;
+		txBuffer[MRBUS_PKT_TYPE] = 'a';
+		mrbusPktQueuePush(&mrbeeTxQueue, txBuffer, txBuffer[MRBUS_PKT_LEN]);
 		goto PktIgnore;
 	} 
-	else if ('W' == mrbus_rx_buffer[MRBUS_PKT_TYPE]) 
+	else if ('W' == rxBuffer[MRBUS_PKT_TYPE]) 
 	{
 		// EEPROM WRITE Packet
-		mrbus_tx_buffer[MRBUS_PKT_DEST] = mrbus_rx_buffer[MRBUS_PKT_SRC];
-		mrbus_tx_buffer[MRBUS_PKT_LEN] = 8;			
-		mrbus_tx_buffer[MRBUS_PKT_TYPE] = 'w';
-		eeprom_write_byte((uint8_t*)(uint16_t)mrbus_rx_buffer[6], mrbus_rx_buffer[7]);
-		mrbus_tx_buffer[6] = mrbus_rx_buffer[6];
-		mrbus_tx_buffer[7] = mrbus_rx_buffer[7];
-		if (MRBUS_EE_DEVICE_ADDR == mrbus_rx_buffer[6])
+		txBuffer[MRBUS_PKT_DEST] = rxBuffer[MRBUS_PKT_SRC];
+		txBuffer[MRBUS_PKT_LEN] = 8;
+		txBuffer[MRBUS_PKT_TYPE] = 'w';
+		eeprom_write_byte((uint8_t*)(uint16_t)rxBuffer[6], rxBuffer[7]);
+		txBuffer[6] = rxBuffer[6];
+		txBuffer[7] = rxBuffer[7];
+		if (MRBUS_EE_DEVICE_ADDR == rxBuffer[6])
 			mrbus_dev_addr = eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_ADDR);
-		else if ( (MRBUS_EE_DEVICE_UPDATE_L == mrbus_rx_buffer[6]) || (MRBUS_EE_DEVICE_UPDATE_H == mrbus_rx_buffer[6]) )
+		txBuffer[MRBUS_PKT_SRC] = mrbus_dev_addr;
+		mrbusPktQueuePush(&mrbeeTxQueue, txBuffer, txBuffer[MRBUS_PKT_LEN]);
+
+		if (MRBUS_EE_DEVICE_ADDR == rxBuffer[6])
+			mrbus_dev_addr = eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_ADDR);
+		else if ( (MRBUS_EE_DEVICE_UPDATE_L == rxBuffer[6]) || (MRBUS_EE_DEVICE_UPDATE_H == rxBuffer[6]) )
 		{
-		    pkt_period = ((eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_UPDATE_H) << 8) & 0xFF00) | (eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_UPDATE_L) & 0x00FF);
-#if defined DHT11 || defined DHT22
-			pkt_period = max(pkt_period, 20);
-#endif
+			pkt_period = ((eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_UPDATE_H) << 8) & 0xFF00) | (eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_UPDATE_L) & 0x00FF);
 		}
-		else if (TH_EE_NUM_AVG == mrbus_rx_buffer[6])
-		{
-			num_avg = eeprom_read_byte((uint8_t*)TH_EE_NUM_AVG);			
-#if defined DHT11 || defined DHT22 || defined TMP275 || defined TMP275EXT || defined CPS150 || defined HYT221
-			num_avg = 1;
-#endif
-		}
-		mrbus_tx_buffer[MRBUS_PKT_SRC] = mrbus_dev_addr;
-		mrbus_state |= MRBUS_TX_PKT_READY;
 		goto PktIgnore;
-	
 	}
-	else if ('R' == mrbus_rx_buffer[MRBUS_PKT_TYPE]) 
+	else if ('R' == rxBuffer[MRBUS_PKT_TYPE]) 
 	{
 		// EEPROM READ Packet
-		mrbus_tx_buffer[MRBUS_PKT_DEST] = mrbus_rx_buffer[MRBUS_PKT_SRC];
-		mrbus_tx_buffer[MRBUS_PKT_SRC] = mrbus_dev_addr;
-		mrbus_tx_buffer[MRBUS_PKT_LEN] = 8;			
-		mrbus_tx_buffer[MRBUS_PKT_TYPE] = 'r';
-		mrbus_tx_buffer[6] = mrbus_rx_buffer[6];
-		mrbus_tx_buffer[7] = eeprom_read_byte((uint8_t*)(uint16_t)mrbus_rx_buffer[6]);			
-		mrbus_state |= MRBUS_TX_PKT_READY;
+		txBuffer[MRBUS_PKT_DEST] = rxBuffer[MRBUS_PKT_SRC];
+		txBuffer[MRBUS_PKT_SRC] = mrbus_dev_addr;
+		txBuffer[MRBUS_PKT_LEN] = 8;			
+		txBuffer[MRBUS_PKT_TYPE] = 'r';
+		txBuffer[6] = rxBuffer[6];
+		txBuffer[7] = eeprom_read_byte((uint8_t*)(uint16_t)rxBuffer[6]);			
+		mrbusPktQueuePush(&mrbeeTxQueue, txBuffer, txBuffer[MRBUS_PKT_LEN]);
 		goto PktIgnore;
 	}
-	else if ('V' == mrbus_rx_buffer[MRBUS_PKT_TYPE])
-    {
-        // Version
-        mrbus_tx_buffer[MRBUS_PKT_DEST] = mrbus_rx_buffer[MRBUS_PKT_SRC];
-		mrbus_tx_buffer[MRBUS_PKT_SRC] = mrbus_dev_addr;
-        mrbus_tx_buffer[MRBUS_PKT_LEN] = 14;
-        mrbus_tx_buffer[MRBUS_PKT_TYPE] = 'v';
-#ifdef MRBEE
-        mrbus_tx_buffer[6]  = MRBUS_VERSION_WIRELESS;
-#else
-        mrbus_tx_buffer[6]  = MRBUS_VERSION_WIRED;
-#endif
-        mrbus_tx_buffer[7]  = SWREV; // Software Revision
-        mrbus_tx_buffer[8]  = SWREV; // Software Revision
-        mrbus_tx_buffer[9]  = SWREV; // Software Revision
-        mrbus_tx_buffer[10]  = HWREV_MAJOR; // Hardware Major Revision
-        mrbus_tx_buffer[11]  = HWREV_MINOR; // Hardware Minor Revision
-        mrbus_tx_buffer[12] = 'T';
-        mrbus_tx_buffer[13] = 'H';
-        mrbus_state |= MRBUS_TX_PKT_READY;
-        goto PktIgnore;
-    }
-	else if ('X' == mrbus_rx_buffer[MRBUS_PKT_TYPE]) 
+	else if ('V' == rxBuffer[MRBUS_PKT_TYPE]) 
+	{
+		// Version
+		createVersionPacket(rxBuffer[MRBUS_PKT_SRC], txBuffer);
+		mrbusPktQueuePush(&mrbeeTxQueue, txBuffer, txBuffer[MRBUS_PKT_LEN]);
+		goto PktIgnore;
+	}
+	else if ('X' == rxBuffer[MRBUS_PKT_TYPE]) 
 	{
 		// Reset
 		cli();
@@ -213,10 +196,6 @@ void PktHandler(void)
 		while(1);  // Force a watchdog reset
 		sei();
 	}
-
-	// FIXME:  Insert code here to handle incoming packets specific
-	// to the device.
-
 	//*************** END PACKET HANDLER  ***************
 
 	
@@ -228,7 +207,6 @@ PktIgnore:
 	// This section resets anything that needs to be reset in order to allow us to receive
 	// another packet.  Typically, that's just clearing the MRBUS_RX_PKT_READY flag to 
 	// indicate to the core library that the mrbus_rx_buffer is clear.
-	mrbus_state &= (~MRBUS_RX_PKT_READY);
 	return;	
 }
 
@@ -266,9 +244,9 @@ uint8_t sht3x_crc_calculate(uint16_t sensorVal)
 	for(bit=8; bit > 0; bit--)
 	{
 		if (crc & 0x80)
-			*crc = (*crc << 1) ^ CRC_POLYNOMIAL;
+			crc = (crc << 1) ^ CRC_POLYNOMIAL;
 		else
-			*crc = (*crc << 1);
+			crc = (crc << 1);
 	}
 
 	crc ^= (sensorVal & 0xFF);
@@ -296,7 +274,7 @@ void sht3x_start_conversion()
 	sht3x_read_countdown = 2; // In 100mS increments
 }
 
-uint8_t sht3x_read_value(float* kelvinTemp, uint16_t* relativeHumidity)
+uint8_t sht3x_read_value(float* kelvinTemp, float* relativeHumidity)
 {
 	uint8_t msgBuf[7];
 	uint16_t tmpVal=0;
@@ -323,7 +301,7 @@ uint8_t sht3x_read_value(float* kelvinTemp, uint16_t* relativeHumidity)
 	{
 		// Checksum works out
 		// RH = 100 * (Sensor / 65535)
-		*relativeHumidity = (float)(tmpVal) / 655.35);
+		*relativeHumidity = ((float)tmpVal) / 655.35;
 	} else {
 		*relativeHumidity = 0;
 		fail |= 0x02;
@@ -537,9 +515,8 @@ void init(void)
 
 int main(void)
 {
-	uint16_t kelvinTemp = 4370; // Expressed in 1/16ths K, base of 273.15 K
-	uint16_t relHumidity = 0; // Expressed in 1/10ths % RH
-	uint16_t barometricPressure = 0;
+	float kelvinTemp = 0.0; // Expressed in 1/16ths K, base of 273.15 K
+	float relHumidity = 0.0; // Expressed in 1/10ths % RH
 	uint8_t count=0;
 	uint16_t decisecs_snapshot;
 
@@ -550,27 +527,15 @@ int main(void)
 	// remove it if you don't use it.
 	initialize100HzTimer();
 	
-	// Initialize MRBus core
-	mrbusInit();
-
-	// Prep for initial 'v' packet - fake a 'V' request
-	mrbus_rx_buffer[0] = 0xFF;
-	mrbus_rx_buffer[1] = 0xFF;
-	mrbus_rx_buffer[2] = 0x06;
-	mrbus_rx_buffer[3] = 0x6E;
-	mrbus_rx_buffer[4] = 0x7F;
-	mrbus_rx_buffer[5] = 0x56;
-	mrbus_state |= MRBUS_RX_PKT_READY;
-
-	sei();	
+	sei();
 
 	while (1)
 	{
 		wdt_reset();
-		mrbeePoll();
 
 		// Handle any packets that may have come in
-		if (mrbus_state & MRBUS_RX_PKT_READY)
+		// Handle any packets that may have come in
+		if (mrbusPktQueueDepth(&mrbeeRxQueue))
 			PktHandler();
 
 		switch(th_state)
@@ -604,7 +569,7 @@ int main(void)
 				{
 					uint8_t conversionComplete = 0;
 
-#elif defined SHT3X
+#if defined SHT3X
 					if (0 == sht3x_read_countdown)
 						conversionComplete = 1;
 #elif defined DUMMY_SENSOR
@@ -622,9 +587,7 @@ int main(void)
 
 			case TH_STATE_READ:
 				{
-					uint16_t temp;
-					
-					relHumidity = 0; // Expressed in 1/10ths % RH		
+					relHumidity = 0.0; // Expressed in 1/10ths % RH		
 
 		#if defined SHT3X
 					sht3x_read_value(&kelvinTemp, &relHumidity);
@@ -656,10 +619,11 @@ int main(void)
 					mrbusTxBuffer[MRBUS_PKT_LEN] = 12;
 					mrbusTxBuffer[5] = 'S';
 					mrbusTxBuffer[6] = 0;  // Status byte.  Lower three bits are sensor type, 000 = DHT11/DHT22/RHT03
-					mrbusTxBuffer[7] = (kelvinTemp >> 8);
+/*					mrbusTxBuffer[7] = (kelvinTemp >> 8);
 					mrbusTxBuffer[8] = kelvinTemp & 0xff;
 					mrbusTxBuffer[9] = (relHumidity >> 8);
-					mrbusTxBuffer[10] = relHumidity & 0xff;
+					mrbusTxBuffer[10] = relHumidity & 0xff;*/
+
 					mrbusTxBuffer[11] = (VINDIV * VDD * (uint32_t)busVoltage) / 1024;  // VINDIV is reciprocal of VIN divider ratio.  VDD is in decivolts
 
 					mrbusPktQueuePush(&mrbeeTxQueue, mrbusTxBuffer, mrbusTxBuffer[MRBUS_PKT_LEN]);
@@ -673,8 +637,8 @@ int main(void)
 
 
 			case TH_STATE_XMIT_WAIT:
-				if (TH_STATE_XMIT_WAIT == th_state 
-					&& !(mrbus_state & (MRBUS_TX_BUF_ACTIVE | MRBUS_TX_PKT_READY)))
+				/*
+				if(mrbus_state & (MRBUS_TX_BUF_ACTIVE | MRBUS_TX_PKT_READY)))
 				{
 					uint8_t i=0;
 					// FIXME: this is crap
@@ -682,7 +646,7 @@ int main(void)
 					// Also, do this as a loop, in case we're on a short watchdog
 					for (i=0; i<25; i++)
 					{
-						wdt_reset();							
+						wdt_reset();
 						_delay_ms(10);
 					}
 					
@@ -700,12 +664,13 @@ int main(void)
 					}
 
 					th_state = TH_STATE_WAKE;
-				}
+				}*/
+				// This block is total crap and needs to be rewritten
 				break;
 
 			case TH_STATE_WAKE:
 				// FIXME:  Do wakeup stuff
-				th_state = TH_STATE_IDLE;		
+				th_state = TH_STATE_IDLE;
 				break;
 
 			default:

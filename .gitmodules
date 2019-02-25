@@ -1,0 +1,11 @@
+[submodule "src/mrbus"]
+	path = src/mrbus
+	url = https://github.com/IowaScaledEngineering/mrbus.git
+	branch = master
+	ignore = untracked
+[submodule "src/avr-i2c"]
+	path = src/avr-i2c
+	url = https://github.com/IowaScaledEngineering/avr-i2c
+	branch = master
+	ignore = untracked
+
