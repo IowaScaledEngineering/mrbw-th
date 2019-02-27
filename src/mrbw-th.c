@@ -1,15 +1,15 @@
 /*************************************************************************
-Title:    MRBus AVR Template
+Title:    MRBW-TH Firmware
 Authors:  Nathan D. Holmes <maverick@drgw.net>
 File:     $Id: $
 License:  GNU General Public License v3
 
 LICENSE:
-    Copyright (C) 2012 Nathan Holmes
+    Copyright (C) 2019 Nathan Holmes & Michael Petersen
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
+    the Free Software Foundation; either version 3 of the License, or
     any later version.
 
     This program is distributed in the hope that it will be useful,
@@ -28,8 +28,6 @@ LICENSE:
 #include <avr/interrupt.h>
 #include <avr/eeprom.h>
 #include <util/delay.h>
-
-#include "mrbus.h"
 
 #include "mrbee.h"
 
@@ -50,7 +48,6 @@ MRBusPacket mrbusTxPktBufferArray[MRBUS_TX_BUFFER_DEPTH];
 MRBusPacket mrbusRxPktBufferArray[MRBUS_RX_BUFFER_DEPTH];
 
 uint8_t mrbus_dev_addr = 0;
-uint8_t th_state = TH_STATE_IDLE;
 uint8_t num_avg = 1;
 uint16_t pkt_period = 20;
 
@@ -66,12 +63,12 @@ void disableExternal33()
 
 void enableXB3()
 {
-	PORTD &= ~_BV(PD7);
+	PORTD &= ~_BV(PD4);
 }
 
 void disableXB3()
 {
-	PORTD |= _BV(PD7);
+	PORTD |= _BV(PD4);
 }
 
 
@@ -472,14 +469,14 @@ void init(void)
 #endif
 
 	// Set sleep pin to output; drive low
-	DDRD = _BV(PD7);
-	PORTD = 0x7F;
+	DDRD = _BV(PD4) | _BV(PD2);
+	PORTD = _BV(PD0) | _BV(PD1);
 
 	DDRB = 0;
 	PORTB = 0xFF;
 
 	DDRC = _BV(PC2); // External 3.3V enable pin	
-	PORTC = 0xFF;
+	PORTC = 0xFF & ~(_BV(PC2));
 
 	ACSR = _BV(ACD);
 #if defined SHT3X
@@ -509,7 +506,7 @@ void init(void)
 	ADCSRB = 0x00;
 	DIDR0  = 0x00;  // No digitals were harmed in the making of this ADC
 
-	disableExternal33();
+	enableExternal33();
 }
 
 
@@ -517,8 +514,8 @@ int main(void)
 {
 	float kelvinTemp = 0.0; // Expressed in 1/16ths K, base of 273.15 K
 	float relHumidity = 0.0; // Expressed in 1/10ths % RH
-	uint8_t count=0;
-	uint16_t decisecs_snapshot;
+	uint8_t th_state = TH_STATE_IDLE;
+	uint16_t decisecs_snapshot = 0;
 
 	// Application initialization
 	init();
@@ -534,7 +531,6 @@ int main(void)
 		wdt_reset();
 
 		// Handle any packets that may have come in
-		// Handle any packets that may have come in
 		if (mrbusPktQueueDepth(&mrbeeRxQueue))
 			PktHandler();
 
@@ -546,7 +542,6 @@ int main(void)
 					if (decisecs >= pkt_period)
 					{
 						th_state = TH_STATE_TRIGGER;
-						count = 0;
 						decisecs = 0;
 					}
 				}
@@ -568,7 +563,6 @@ int main(void)
 			case TH_STATE_WAIT:
 				{
 					uint8_t conversionComplete = 0;
-
 #if defined SHT3X
 					if (0 == sht3x_read_countdown)
 						conversionComplete = 1;
@@ -579,34 +573,25 @@ int main(void)
 #endif
 					if (conversionComplete && !(ADCSRA & _BV(ADEN)) )
 					{
-						PORTC &= ~_BV(PC5);
 						th_state = TH_STATE_READ;
 					}
 				}
 				break;
 
 			case TH_STATE_READ:
-				{
-					relHumidity = 0.0; // Expressed in 1/10ths % RH		
+				relHumidity = 0.0; // Expressed in 1/10ths % RH		
 
-		#if defined SHT3X
-					sht3x_read_value(&kelvinTemp, &relHumidity);
-		#elif defined DUMMY_SENSOR
-					// Tada!  Both the temperature and humity are going to be 42
-					kelvinTemp = 42;
-					relHumidity = 42;
-		#endif
-					// Div by 8, as we use 8 samples
-					busVoltage = busVoltage >> 3;  
+	#if defined SHT3X
+				//sht3x_read_value(&kelvinTemp, &relHumidity);
+	#elif defined DUMMY_SENSOR
+				// Tada!  Both the temperature and humity are going to be 42
+				kelvinTemp = 42;
+				relHumidity = 42;
+	#endif
+				// Div by 8, as we use 8 samples
+				busVoltage = busVoltage >> 3;  
 
-					if(++count >= num_avg)
-					{
-						th_state = TH_STATE_SEND_PACKET;
-						count = 0;
-					} else {
-						th_state = TH_STATE_TRIGGER;
-					}
-				}
+				th_state = TH_STATE_SEND_PACKET;
 				break;
 
 			case TH_STATE_SEND_PACKET:
@@ -619,13 +604,7 @@ int main(void)
 					mrbusTxBuffer[MRBUS_PKT_LEN] = 12;
 					mrbusTxBuffer[5] = 'S';
 					mrbusTxBuffer[6] = 0;  // Status byte.  Lower three bits are sensor type, 000 = DHT11/DHT22/RHT03
-/*					mrbusTxBuffer[7] = (kelvinTemp >> 8);
-					mrbusTxBuffer[8] = kelvinTemp & 0xff;
-					mrbusTxBuffer[9] = (relHumidity >> 8);
-					mrbusTxBuffer[10] = relHumidity & 0xff;*/
-
 					mrbusTxBuffer[11] = (VINDIV * VDD * (uint32_t)busVoltage) / 1024;  // VINDIV is reciprocal of VIN divider ratio.  VDD is in decivolts
-
 					mrbusPktQueuePush(&mrbeeTxQueue, mrbusTxBuffer, mrbusTxBuffer[MRBUS_PKT_LEN]);
 				}
 #ifdef LOWPOWER
@@ -637,8 +616,8 @@ int main(void)
 
 
 			case TH_STATE_XMIT_WAIT:
-				/*
-				if(mrbus_state & (MRBUS_TX_BUF_ACTIVE | MRBUS_TX_PKT_READY)))
+				th_state = TH_STATE_IDLE;
+				/*if(mrbus_state & (MRBUS_TX_BUF_ACTIVE | MRBUS_TX_PKT_READY)))
 				{
 					uint8_t i=0;
 					// FIXME: this is crap
@@ -687,26 +666,18 @@ int main(void)
 		}
 
 		// Transmit any pending MRBus packets
-		while (mrbusPktQueueDepth(&mrbeeTxQueue))
+		if (mrbusPktQueueDepth(&mrbeeTxQueue))
 		{
 			// Unsleep the XBee
 			enableXB3();
 			wdt_reset();
 			mrbeeTransmit();
+			// Wait for XBee TX ISR to finish
+			do {wdt_reset();} while (mrbeeTxActive());
+			// Sleep the XBee
 		}
-
-		// Wait for XBee TX ISR to finish
-		do {wdt_reset();} while (bit_is_set(UCSR0B, UDRIE0));
-
-		// Handle any MRBus packets that may have come in
-		if (mrbusPktQueueDepth(&mrbeeRxQueue))
-		{
-			PktHandler();
-		}
-
-
-		// Sleep the XBee
-		disableXB3();
+		//disableXB3();
+		
 	}
 }
 
