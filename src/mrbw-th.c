@@ -30,16 +30,8 @@ LICENSE:
 #include <util/delay.h>
 
 #include "mrbee.h"
+#include "avr-i2c-master.h"
 
-#define TH_STATE_IDLE          0x00
-#define TH_STATE_TRIGGER       0x10 
-#define TH_STATE_WAIT          0x20
-#define TH_STATE_READ          0x30
-#define TH_STATE_SEND_PACKET   0x40
-#define TH_STATE_XMIT_WAIT     0x50
-#define TH_STATE_WAKE          0x60
-
-#define TH_EE_NUM_AVG          0x10
 
 #define MRBUS_TX_BUFFER_DEPTH 4
 #define MRBUS_RX_BUFFER_DEPTH 4
@@ -71,6 +63,10 @@ void disableXB3()
 	PORTD |= _BV(PD4);
 }
 
+uint8_t isXbeeEnabled()
+{
+	return ( (PORTD & _BV(PD4))?0:1 );
+}
 
 void createVersionPacket(uint8_t destAddr, uint8_t *buf)
 {
@@ -210,19 +206,43 @@ PktIgnore:
 volatile uint16_t busVoltage=0;
 volatile uint8_t busVoltageCount=0;
 
+void initializeADC()
+{
+	busVoltage = 0;
+	busVoltageCount = 0;
+
+	ACSR = _BV(ACD);
+
+	// Setup ADC for bus voltage monitoring
+	ADMUX  = 0x47;  // AVCC reference, ADC0 starting channel
+	ADCSRA = _BV(ADIF) | _BV(ADPS2) | _BV(ADPS1) | _BV(ADPS0); // 128 prescaler
+	ADCSRB = 0x00;
+	DIDR0  = 0x00;  // No digitals were harmed in the making of this ADC
+}
+
+
 ISR(ADC_vect)
 {
 	busVoltage += ADC;
 	if (++busVoltageCount >=8)
 	{
 		// Disable ADC
-		ADCSRA &= ~(_BV(ADEN) | _BV(ADIE));	
+		ADCSRA &= ~(_BV(ADEN) | _BV(ADIE) | _BV(ADATE));	
 	}
 }
 
+void startADCConversion()
+{
+	busVoltage = 0;
+	busVoltageCount = 0;
+	// Enable ADC and ISR, clear interrupt flag
+	ADCSRA |= _BV(ADEN) | _BV(ADSC) | _BV(ADIE) | _BV(ADIF) | _BV(ADATE);
+}
 
-#ifdef SHT3X
-#include "avr-i2c-master.h"
+uint8_t isADCDone()
+{
+	return ((busVoltageCount>=8)?1:0);
+}
 
 volatile uint8_t sht3x_read_countdown=0;
 
@@ -266,12 +286,12 @@ void sht3x_start_conversion()
 	msgBuf[0] = SHT3X_I2C_ADDR;
 	msgBuf[1] = 0x24; // No clock stretching
 	msgBuf[2] = 0x00; // High accuracy/repeatability
-	i2c_transmit(msgBuf, 1, 0);
+	i2c_transmit(msgBuf, 3, 1);
 	while(i2c_busy());
 	sht3x_read_countdown = 2; // In 100mS increments
 }
 
-uint8_t sht3x_read_value(float* kelvinTemp, float* relativeHumidity)
+uint8_t sht3x_read_value(float* tempCelsius, float* relativeHumidity)
 {
 	uint8_t msgBuf[7];
 	uint16_t tmpVal=0;
@@ -283,18 +303,18 @@ uint8_t sht3x_read_value(float* kelvinTemp, float* relativeHumidity)
 	i2c_receive(msgBuf, 7);
 
 	tmpVal = ((((uint16_t)msgBuf[1]))<<8) | ((uint16_t)msgBuf[2]);
-	if (msgBuf[3] == sht3x_crc_calculate(tmpVal))
+	if (1 || msgBuf[3] == sht3x_crc_calculate(tmpVal))
 	{
 		// Checksum works out
 		// Tc = -45 + 175 * (Sensor / 65535)
-		*kelvinTemp = -45.0 + ( ((float)tmpVal) / (65535.0 / 175.0) );
+		*tempCelsius = -45.0 + ( ((float)tmpVal) / (65535.0 / 175.0) );
 	} else {
-		*kelvinTemp = 0;
+		*tempCelsius = 0;
 		fail |= 0x01;
 	}
 
 	tmpVal = ((((uint16_t)msgBuf[4]))<<8) | ((uint16_t)msgBuf[5]);
-	if (msgBuf[6] == sht3x_crc_calculate(tmpVal))
+	if (1 || msgBuf[6] == sht3x_crc_calculate(tmpVal))
 	{
 		// Checksum works out
 		// RH = 100 * (Sensor / 65535)
@@ -306,11 +326,6 @@ uint8_t sht3x_read_value(float* kelvinTemp, float* relativeHumidity)
 		
 	return(fail);
 }
-
-#endif
-
-
-#ifdef LOWPOWER
 
 volatile uint8_t wdt_tripped=0;
 
@@ -381,7 +396,7 @@ uint16_t system_sleep(uint16_t sleep_decisecs)
 		wdt_tripped = 0;
 		// Wrap this in a loop, so we go back to sleep unless the WDT woke us up
 		while (0 == wdt_tripped)
-        	sleep_cpu();
+			sleep_cpu();
 
 		wdt_reset();
 		WDTCSR |= _BV(WDIE); // Restore WDT interrupt mode
@@ -390,6 +405,7 @@ uint16_t system_sleep(uint16_t sleep_decisecs)
 	}
 
 	sleep_disable();
+
 
 #ifdef ENABLE_WATCHDOG
 	// If you don't want the watchdog to do system reset, remove this chunk of code
@@ -406,8 +422,6 @@ uint16_t system_sleep(uint16_t sleep_decisecs)
 	return(slept);
 }
 
-#endif
-
 
 // ******** Start 100 Hz Timer, 0.16% error version (Timer 0)
 // If you can live with a slightly less accurate timer, this one only uses Timer 0, leaving Timer 1 open
@@ -419,16 +433,14 @@ uint16_t system_sleep(uint16_t sleep_decisecs)
 // If you do remove it, be sure to yank the interrupt handler and ticks/secs as well
 // and the call to this function in the main function
 
-volatile uint8_t ticks;
 volatile uint16_t decisecs;
+volatile uint8_t xbeeIdleCountdown = 0;
 
 void initialize100HzTimer(void)
 {
 	// Set up timer 1 for 100Hz interrupts
 	TCNT0 = 0;
-	//OCR0A = 0xC2;
 	OCR0A = 0x6C; // Appropriate for 11.0592 MHz
-	ticks = 0;
 	decisecs = 0;
 	TCCR0A = _BV(WGM01);
 	TCCR0B = _BV(CS02) | _BV(CS00);
@@ -437,6 +449,7 @@ void initialize100HzTimer(void)
 
 ISR(TIMER0_COMPA_vect)
 {
+	static uint8_t ticks = 0;
 	if (++ticks >= 10)
 	{
 		ticks = 0;
@@ -446,43 +459,46 @@ ISR(TIMER0_COMPA_vect)
 		if (sht3x_read_countdown)
 			sht3x_read_countdown--;
 #endif
+
+		if (xbeeIdleCountdown)
+			xbeeIdleCountdown--;
+
 	}
 }
 
 // End of 100Hz timer
 
+typedef enum
+{
+	TH_STATE_IDLE          = 0x00,
+	TH_STATE_TRIGGER       = 0x10,
+	TH_STATE_WAIT          = 0x20,
+	TH_STATE_READ          = 0x30,
+	TH_STATE_SEND_PACKET   = 0x40,
+	TH_STATE_XMIT_WAIT     = 0x50,
+	TH_STATE_WAKE          = 0x60,
+	TH_STATE_SLEEP         = 0x70
+} THState;
 
 
 void init(void)
 {
 	// Kill watchdog
 	MCUSR = 0;
-#ifdef ENABLE_WATCHDOG
-	// If you don't want the watchdog to do system reset, remove this chunk of code
+	wdt_enable(WDTO_1S);
 	wdt_reset();
-	WDTCSR |= _BV(WDE) | _BV(WDCE);
-	WDTCSR = _BV(WDE) | _BV(WDP2) | _BV(WDP1); // Set the WDT to system reset and 1s timeout
-	wdt_reset();
-#else
-	wdt_reset();
-	wdt_disable();
-#endif
-
-	// Set sleep pin to output; drive low
-	DDRD = _BV(PD4) | _BV(PD2);
-	PORTD = _BV(PD0) | _BV(PD1);
 
 	DDRB = 0;
 	PORTB = 0xFF;
 
 	DDRC = _BV(PC2); // External 3.3V enable pin	
-	PORTC = 0xFF & ~(_BV(PC2));
+	PORTC = 0xFF;
+	PORTC &= ~(_BV(PC2));
 
-	ACSR = _BV(ACD);
-#if defined SHT3X
-	i2c_master_init();
-#endif
-	
+	// Set sleep pin to output; drive low
+	DDRD = _BV(PD4) | _BV(PD2);
+	PORTD = 0xFF;
+
 	// Initialize MRBus address from EEPROM address 1
 	mrbus_dev_addr = eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_ADDR);
 
@@ -493,30 +509,19 @@ void init(void)
 	// Initialize MRBus packet update interval from EEPROM
 	pkt_period = ((eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_UPDATE_H) << 8) & 0xFF00) | (eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_UPDATE_L) & 0x00FF);
 
-	// Initialize averaging value from EEPROM
-#if defined SHT3X
-	num_avg = 1;
-#else
-	num_avg = eeprom_read_byte((uint8_t*)TH_EE_NUM_AVG);
-#endif
-	
-	// Setup ADC
-	ADMUX  = 0x47;  // AVCC reference; ADC7 input
-	ADCSRA = _BV(ADATE) | _BV(ADIF) | _BV(ADPS2) | _BV(ADPS1); // 128 prescaler
-	ADCSRB = 0x00;
-	DIDR0  = 0x00;  // No digitals were harmed in the making of this ADC
-
 	enableExternal33();
+	i2c_master_init();
+
+	initializeADC();
+
+	enableXB3();
 }
 
 
 int main(void)
 {
-	float kelvinTemp = 0.0; // Expressed in 1/16ths K, base of 273.15 K
-	float relHumidity = 0.0; // Expressed in 1/10ths % RH
-	uint8_t th_state = TH_STATE_IDLE;
-	uint16_t decisecs_snapshot = 0;
-
+	THState thState = TH_STATE_IDLE;
+	
 	// Application initialization
 	init();
 
@@ -534,150 +539,117 @@ int main(void)
 		if (mrbusPktQueueDepth(&mrbeeRxQueue))
 			PktHandler();
 
-		switch(th_state)
+		switch(thState)
 		{
 			case TH_STATE_IDLE:
 				ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
 				{
 					if (decisecs >= pkt_period)
 					{
-						th_state = TH_STATE_TRIGGER;
-						decisecs = 0;
+							decisecs = 0;
+							thState = TH_STATE_TRIGGER;
 					}
 				}
 				break;
 
 			case TH_STATE_TRIGGER:
-	#if defined SHT3X
+				startADCConversion();
 				sht3x_start_conversion();
-	#elif defined DUMMY_SENSOR
-				// Do nothing
-	#endif
-				// Trigger an ADC conversion
-				busVoltage = 0;
-				busVoltageCount = 0;
-				ADCSRA |= _BV(ADEN) | _BV(ADSC) | _BV(ADIE) | _BV(ADIF);
-				th_state = TH_STATE_WAIT;
+				thState = TH_STATE_WAIT;
 				break;
 
 			case TH_STATE_WAIT:
-				{
-					uint8_t conversionComplete = 0;
-#if defined SHT3X
-					if (0 == sht3x_read_countdown)
-						conversionComplete = 1;
-#elif defined DUMMY_SENSOR
-					// Just wait a while
-					_delay_us(200);
-					conversionComplete = 1;
-#endif
-					if (conversionComplete && !(ADCSRA & _BV(ADEN)) )
-					{
-						th_state = TH_STATE_READ;
-					}
-				}
+				if (isADCDone() && 0 == sht3x_read_countdown)
+					thState = TH_STATE_READ;
 				break;
 
 			case TH_STATE_READ:
-				relHumidity = 0.0; // Expressed in 1/10ths % RH		
-
-	#if defined SHT3X
-				//sht3x_read_value(&kelvinTemp, &relHumidity);
-	#elif defined DUMMY_SENSOR
-				// Tada!  Both the temperature and humity are going to be 42
-				kelvinTemp = 42;
-				relHumidity = 42;
-	#endif
-				// Div by 8, as we use 8 samples
-				busVoltage = busVoltage >> 3;  
-
-				th_state = TH_STATE_SEND_PACKET;
-				break;
-
-			case TH_STATE_SEND_PACKET:
 				{
 					uint8_t mrbusTxBuffer[MRBUS_BUFFER_SIZE];
+					float temperature = 0.0;
+					float humidity = 0.0;
+					
+					uint8_t tmp;
+					
 					memset(mrbusTxBuffer, 0, sizeof(mrbusTxBuffer));
+
+					sht3x_read_value(&temperature, &humidity);
 
 					mrbusTxBuffer[MRBUS_PKT_SRC] = mrbus_dev_addr;
 					mrbusTxBuffer[MRBUS_PKT_DEST] = 0xFF;
-					mrbusTxBuffer[MRBUS_PKT_LEN] = 12;
+					mrbusTxBuffer[MRBUS_PKT_LEN] = 10;
 					mrbusTxBuffer[5] = 'S';
-					mrbusTxBuffer[6] = 0;  // Status byte.  Lower three bits are sensor type, 000 = DHT11/DHT22/RHT03
-					mrbusTxBuffer[11] = (VINDIV * VDD * (uint32_t)busVoltage) / 1024;  // VINDIV is reciprocal of VIN divider ratio.  VDD is in decivolts
+					mrbusTxBuffer[6] = num_avg++;  // Status byte.  Lower three bits are sensor type, 000 = DHT11/DHT22/RHT03
+					mrbusTxBuffer[7] = busVoltage / 248;  // VINDIV is reciprocal of VIN divider ratio.  VDD is in decivolts
+					
+					tmp = (uint8_t)temperature;
+					mrbusTxBuffer[8] = tmp;
+
+					tmp = (uint8_t)humidity;
+					mrbusTxBuffer[9] = tmp;
+
 					mrbusPktQueuePush(&mrbeeTxQueue, mrbusTxBuffer, mrbusTxBuffer[MRBUS_PKT_LEN]);
 				}
-#ifdef LOWPOWER
-				th_state = TH_STATE_XMIT_WAIT;
-#else
-				th_state = TH_STATE_IDLE;
-#endif
+				thState = TH_STATE_SEND_PACKET;
 				break;
 
+			case TH_STATE_SEND_PACKET:
+				// Transmit any pending MRBus packets
+				while (mrbusPktQueueDepth(&mrbeeTxQueue))
+				{
+					if (!isXbeeEnabled())
+					{
+						enableXB3(); // Wake the XBee at this point - can take up to 6mS to start up
+						_delay_ms(6);
+					}
+					mrbeeTransmit();
+				}
+
+				// Wait for XBee TX ISR to finish
+				if (!mrbeeTxActive())
+				{
+					xbeeIdleCountdown = 3;
+					thState = TH_STATE_XMIT_WAIT;
+				}
+				break;
 
 			case TH_STATE_XMIT_WAIT:
-				th_state = TH_STATE_IDLE;
-				/*if(mrbus_state & (MRBUS_TX_BUF_ACTIVE | MRBUS_TX_PKT_READY)))
-				{
-					uint8_t i=0;
-					// FIXME: this is crap
-					// Need to actually see when we're done sending out of the XBEE
-					// Also, do this as a loop, in case we're on a short watchdog
-					for (i=0; i<25; i++)
-					{
-						wdt_reset();
-						_delay_ms(10);
-					}
-					
-					// Grab snapshot of decisecs to make sure it doesn't advance between
-					// the comparison and the subtraction, causing a "negative" sleep value.
-					ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
-					{
-						decisecs_snapshot = decisecs;
-					}
-
-					if(decisecs_snapshot < pkt_period)
-					{
-						// Not yet at pkt_period, sleep for remaining time
-						decisecs += system_sleep(pkt_period - decisecs_snapshot);
-					}
-
-					th_state = TH_STATE_WAKE;
-				}*/
-				// This block is total crap and needs to be rewritten
+				if (0 == xbeeIdleCountdown)
+					thState = TH_STATE_SLEEP;
 				break;
 
 			case TH_STATE_WAKE:
-				// FIXME:  Do wakeup stuff
-				th_state = TH_STATE_IDLE;
+				thState = TH_STATE_IDLE;
+				break;
+
+			case TH_STATE_SLEEP:
+				{
+					uint16_t decisecsCopy;
+
+					disableXB3();
+
+					ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
+					{
+						decisecsCopy = decisecs;
+					}
+
+					//PRR |= _BV(PRTWI) | _BV(PRTIM2) | _BV(PRTIM1) | _BV(PRTIM0) | _BV(PRSPI) | _BV(PRADC);
+
+					decisecsCopy += system_sleep(pkt_period - decisecsCopy);
+
+					ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
+					{
+						 decisecs = decisecsCopy;
+					}
+
+					thState = TH_STATE_WAKE;
+				}
 				break;
 
 			default:
-				// No idea why we're here, go back to idle
-				th_state = TH_STATE_IDLE;
+				thState = TH_STATE_IDLE;
 				break;
 		}
-
-
-		// Handle any MRBus packets that may have come in
-		if (mrbusPktQueueDepth(&mrbeeRxQueue))
-		{
-			PktHandler();
-		}
-
-		// Transmit any pending MRBus packets
-		if (mrbusPktQueueDepth(&mrbeeTxQueue))
-		{
-			// Unsleep the XBee
-			enableXB3();
-			wdt_reset();
-			mrbeeTransmit();
-			// Wait for XBee TX ISR to finish
-			do {wdt_reset();} while (mrbeeTxActive());
-			// Sleep the XBee
-		}
-		//disableXB3();
-		
 	}
 }
 
