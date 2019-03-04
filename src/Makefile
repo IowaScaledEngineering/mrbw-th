@@ -60,8 +60,8 @@ MRBEE_PINS =
 
 # -DGIT_REV=0x$(GITREV)L -D'VERSION_STRING="$(REV)"'
 DEFINES := -DF_CPU=$(F_CPU)  -DHWREV_MAJOR=1 -DHWREV_MINOR=2 $(MRBEE_DEFINES) $(MRBEE_PINS)
-SRCS = $(BASE_NAME).c $(MRBUS_LIB)/mrbee-avr.c $(MRBUS_LIB)/mrbus-crc.c $(MRBUS_LIB)/mrbus-queue.c $(I2C_LIB)/avr-i2c-master.c
-INCS = $(MRBUS_LIB)/mrbee.h $(MRBUS_LIB)/mrbee-avr.h $(I2C_LIB)/avr-i2c-master.h
+SRCS = $(BASE_NAME).c $(MRBUS_LIB)/mrbee-avr.c $(MRBUS_LIB)/mrbus-crc.c $(MRBUS_LIB)/mrbus-queue.c $(I2C_LIB)/avr-i2c-master.c float16.c
+INCS = $(MRBUS_LIB)/mrbee.h $(MRBUS_LIB)/mrbee-avr.h $(I2C_LIB)/avr-i2c-master.h float16.h
 
 AVRDUDE = avrdude -P $(PROGRAMMER_PORT) -c $(PROGRAMMER_TYPE) -p $(DEVICE) -B1
 AVRDUDE_SLOW = avrdude -P $(PROGRAMMER_PORT) -c $(PROGRAMMER_TYPE) -p $(DEVICE) -B32

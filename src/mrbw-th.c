@@ -31,7 +31,7 @@ LICENSE:
 
 #include "mrbee.h"
 #include "avr-i2c-master.h"
-
+#include "float16.h"
 
 #define MRBUS_TX_BUFFER_DEPTH 4
 #define MRBUS_RX_BUFFER_DEPTH 4
@@ -406,18 +406,12 @@ uint16_t system_sleep(uint16_t sleep_decisecs)
 
 	sleep_disable();
 
-
-#ifdef ENABLE_WATCHDOG
 	// If you don't want the watchdog to do system reset, remove this chunk of code
 	wdt_reset();
 	MCUSR &= ~(_BV(WDRF));
 	WDTCSR |= _BV(WDE) | _BV(WDCE);
 	WDTCSR = _BV(WDE) | _BV(WDP2) | _BV(WDP1); // Set the WDT to system reset and 1s timeout
 	wdt_reset();
-#else
-	wdt_reset();
-	wdt_disable();
-#endif
 
 	return(slept);
 }
@@ -568,25 +562,32 @@ int main(void)
 					uint8_t mrbusTxBuffer[MRBUS_BUFFER_SIZE];
 					float temperature = 0.0;
 					float humidity = 0.0;
-					
-					uint8_t tmp;
-					
+					float16_t k;
 					memset(mrbusTxBuffer, 0, sizeof(mrbusTxBuffer));
 
 					sht3x_read_value(&temperature, &humidity);
 
 					mrbusTxBuffer[MRBUS_PKT_SRC] = mrbus_dev_addr;
 					mrbusTxBuffer[MRBUS_PKT_DEST] = 0xFF;
-					mrbusTxBuffer[MRBUS_PKT_LEN] = 10;
+					mrbusTxBuffer[MRBUS_PKT_LEN] = 12;
 					mrbusTxBuffer[5] = 'S';
 					mrbusTxBuffer[6] = num_avg++;  // Status byte.  Lower three bits are sensor type, 000 = DHT11/DHT22/RHT03
 					mrbusTxBuffer[7] = busVoltage / 248;  // VINDIV is reciprocal of VIN divider ratio.  VDD is in decivolts
 					
-					tmp = (uint8_t)temperature;
-					mrbusTxBuffer[8] = tmp;
+//					k = F32toF16(temperature);
+					{
+						void* ptr = &temperature;
+						uint32_t k = *((uint32_t*)ptr);
+						mrbusTxBuffer[8] = (k>>24);
+						mrbusTxBuffer[9] = (k>>16);
+						mrbusTxBuffer[10] = (k>>8);
+						mrbusTxBuffer[11] = (uint8_t)k;
+					}
 
-					tmp = (uint8_t)humidity;
-					mrbusTxBuffer[9] = tmp;
+					
+//					mrbusTxBuffer[9] = (uint8_t)(k);
+
+//					mrbusTxBuffer[10] = (uint8_t)humidity;
 
 					mrbusPktQueuePush(&mrbeeTxQueue, mrbusTxBuffer, mrbusTxBuffer[MRBUS_PKT_LEN]);
 				}
