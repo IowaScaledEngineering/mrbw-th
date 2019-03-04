@@ -569,15 +569,14 @@ int main(void)
 
 					mrbusTxBuffer[MRBUS_PKT_SRC] = mrbus_dev_addr;
 					mrbusTxBuffer[MRBUS_PKT_DEST] = 0xFF;
-					mrbusTxBuffer[MRBUS_PKT_LEN] = 11;
+					mrbusTxBuffer[MRBUS_PKT_LEN] = 10;
 					mrbusTxBuffer[5] = 'S';
-					mrbusTxBuffer[6] = num_avg++;  // Status byte.  Lower three bits are sensor type, 000 = DHT11/DHT22/RHT03
-					mrbusTxBuffer[7] = busVoltage / 248;  // VINDIV is reciprocal of VIN divider ratio.  VDD is in decivolts
-					
 					k = F32toF16(temperature);
-					mrbusTxBuffer[8] = (uint8_t)(k>>8);
-					mrbusTxBuffer[9] = (uint8_t)k;
-					mrbusTxBuffer[10] = (uint8_t)humidity;
+					mrbusTxBuffer[6] = (uint8_t)(k>>8);
+					mrbusTxBuffer[7] = (uint8_t)k;
+					mrbusTxBuffer[8] = (uint8_t)humidity;
+					mrbusTxBuffer[9] = busVoltage / 248;  // 1023 = 3.3V, therefore 1023 * 8 / 33 = 248
+					
 
 					mrbusPktQueuePush(&mrbeeTxQueue, mrbusTxBuffer, mrbusTxBuffer[MRBUS_PKT_LEN]);
 				}
