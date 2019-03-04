@@ -87,3 +87,90 @@ float16_t F32toF16(float i)
 	}
 	return(f16);
 }
+
+
+float float32(float16_t h)
+{
+  int s = h & 0x8000;
+  int e = (h & 0x7c00) >> 10;
+  int m = h & 0x03ff;
+  uint32_t x = 0;
+	void* ptr;
+	
+  s <<= 16;
+  if (e == 31) {
+    // infinity or NAN
+    e = 255 << 23;
+    m <<= 13;
+    x = s | e | m;
+  } else if (e > 0) {
+    // normalized
+    e = e + (127 - 15);
+    e <<= 23;
+    m <<= 13;
+    x = s | e | m;
+  } else if (m == 0) {
+    // zero
+    x = s;
+  } else {
+    // subnormal, value is m times 2^-24
+    float f = ((float) m);
+    ptr = &f;
+    x = s | (*(uint32_t*)ptr - (24 << 23));
+  }
+  ptr = &x;
+  
+  return(*((float*)ptr));
+}
+
+
+float16_t float16(float f)
+{
+	void* ptr = &f;
+	uint32_t k = *((uint32_t*)ptr);
+	float16_t h = 0;
+
+  int e = (k >> 23) & 0x000000ff;
+  int s = (k >> 16) & 0x00008000;
+  int m = k & 0x007fffff;
+
+  e = e - 127;
+  if (e == 128) {
+    // infinity or NAN; preserve the leading bits of mantissa
+    // because they tell whether it's a signaling or quiet NAN
+    h = s | (31 << 10) | (m >> 13);
+  } else if (e > 15) {
+    // overflow to infinity
+    h = s | (31 << 10);
+  } else if (e > -15) {
+    // normalized case
+    if ((m & 0x00003fff) == 0x00001000) {
+      // tie, round down to even
+      h = s | ((e+15) << 10) | (m >> 13);
+    } else {
+      // all non-ties, and tie round up to even
+      //   (note that a mantissa of all 1's will round up to all 0's with
+      //   the exponent being increased by 1, which is exactly what we want;
+      //   for example, "0.5-epsilon" rounds up to 0.5, and 65535.0 rounds
+      //   up to infinity.)
+      h = s | ((e+15) << 10) + ((m + 0x00001000) >> 13);
+    }
+  } else if (e > -25) {
+    // convert to subnormal
+    m |= 0x00800000; // restore the implied bit
+    e = -14 - e; // shift count
+    m >>= e; // M now in position but 2^13 too big
+    if ((m & 0x00003fff) == 0x00001000) {
+      // tie round down to even
+    } else {
+      // all non-ties, and tie round up to even
+      m += (1 << 12); // m += 0x00001000
+    }
+    m >>= 13;
+    h = s | m;
+  } else {
+    // zero, or underflow
+    h = s;
+  }
+  return h;
+};
