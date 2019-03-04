@@ -5,9 +5,7 @@
 typedef uint16_t float16_t;
 
 float16_t F32toF16(float i);
-
-float float32(float16_t h);
-float16_t float16(float f);
+float F16toF32(float16_t in);
 
 #endif
 

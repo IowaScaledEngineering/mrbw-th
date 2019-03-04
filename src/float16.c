@@ -1,5 +1,45 @@
 #include "float16.h"
 
+// This is an implementation of conversion functions between normal 
+// IEEE 754 binary32 floats and binary16 half floats.
+//
+// Extracting the relevant code and building this small library was
+// done by Nathan Holmes and Iowa Scaled Engineering
+//
+// This code borrows heavily from two functions from Industrial Light &
+// Magic's OpenEXR code, which is released under a modified BSD license.
+// As such, the required copyright notice is preserved here:
+//
+// Copyright (c) 2002-2011, Industrial Light & Magic, a division of Lucasfilm 
+// Entertainment Company Ltd. All rights reserved. 
+// 
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are
+// met:
+// * Redistributions of source code must retain the above copyright
+// notice, this list of conditions and the following disclaimer.
+// * Redistributions in binary form must reproduce the above
+// copyright notice, this list of conditions and the following disclaimer
+// in the documentation and/or other materials provided with the
+// distribution.
+// * Neither the name of Industrial Light & Magic nor the names of
+// its contributors may be used to endorse or promote products derived
+// from this software without specific prior written permission. 
+// 
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+//
+
+
 /*
 // IEEE 754 binary16 format
 
@@ -25,152 +65,88 @@ M = Mantissa / significand, 23 bits
 */
 
 
-float16_t F32toF16(float i)
+float16_t F32toF16(float in)
 {
-	float16_t f16;
-	void* ptr = &i;
-	uint32_t k = *((uint32_t*)ptr);
-	uint8_t sign = (k & 0x80000000)?1:0;
-	uint8_t rawExponent = 0xFF & ((k & 0x7F800000)>>23);
+	void* ptr = &in;
+	uint32_t f = *((uint32_t*)ptr);
+	float16_t f16 = 0;
+	int32_t e = (f >> 23) & 0x000000ff;
+	int32_t s = (f >> 16) & 0x00008000;
+	int32_t m = f & 0x007fffff;
 
-	// This adds the implicit high bit unless it's a sub-normal number
-	uint32_t rawSignificand = (k & 0x007FFFFF);
+	e -= 127; // Remove exponent bias from float
 
-	f16 = 0;
-
-	// The sign is (almost) certainly getting saved
-	f16 |= sign?0x8000:0;
-
-	if (0 == rawExponent)
+	if (128 == e)
 	{
-		// It's either zero or a sub-normal
-		// Either way it's effectively an underflow upon conversion, so just return a zero
-		return f16;
-
-	} else if (127 == rawExponent) {
-		// Infinity - and beyond!
-		if (0 == rawSignificand) // Infinity
-			f16 |= 0x7C00;
-		else // sNaN and qNaN aren't consistent, just go with one of them
-			f16 |= 0x7E00;
-		return f16;
-
-	} else {
-		// It's a normal value
-		// Calculate the new exponent - float32 is biased at 127, float16 biased at 15
-		int16_t newExponent = (int16_t)rawExponent - 127 + 15;
-		uint16_t f16s = 0;
-
-		if (newExponent > 0x1E)
+		// infinity or NAN
+		f16 = s | 0x7C00 | (m >> 13);
+	} else if (e > 15) {
+		// exponent too bit to represent in half float, just overflow 
+		// to positive or negative infinity, as appropriate
+		f16 = s | 0x7C00;
+	} else if (e > -15) {
+		if ((m & 0x00003fff) == 0x00001000)
 		{
-			// Overflow, set to inf
-			f16 |= 0x7C00;
-			return f16;
-		} else if (newExponent <= 0) {
-			// Underflow
-			if ((14 - newExponent) <= 24)
-			{
-				// Can be recovered as a subnormal
-				// Add the implied high bit
-				rawSignificand |= 0x00800000;
-				f16s = rawSignificand >> (14 - newExponent);
-				if ( (rawSignificand >> (13 - newExponent)) & 0x00000001u)
-					f16s++;
-			}
-			f16 |= (0x03FF & f16s);
+			// tie, round down to even
+			f16 |= s | ((e+15) << 10) | (m >> 13);
 		} else {
-			// Sanity check on exponent is good
-			f16 = (newExponent & 0x001E) << 10;
-			// Truncate and round significand
-			f16 |= (rawSignificand >> 13) + (rawSignificand & 0x1000)?1:0;
+			// all non-ties, and tie round up to even
+			//   (note that a mantissa of all 1's will round up to all 0's with
+			//   the exponent being increased by 1, which is exactly what we want;
+			//   for example, "0.5-epsilon" rounds up to 0.5, and 65535.0 rounds
+			//   up to infinity.)
+			f16 = s | (((e+15) << 10) + ((m + 0x00001000) >> 13));
 		}
+	} else if (e > -25) {
+		// convert to subnormal
+		m |= 0x00800000; // restore the implied bit
+		e = -14 - e; // shift count
+		m >>= e; // M now in position but 2^13 too big
+		if ((m & 0x00003fff) != 0x00001000) {
+			// all non-ties, and tie round up to even
+			m += (1 << 12); // m += 0x00001000
+		}
+		m >>= 13;
+		f16 = s | m;
+	} else {
+		// zero, or underflow
+		f16 = s;
 	}
-	return(f16);
+	return f16;
 }
 
-
-float float32(float16_t h)
+float F16toF32(float16_t in)
 {
-  int s = h & 0x8000;
-  int e = (h & 0x7c00) >> 10;
-  int m = h & 0x03ff;
-  uint32_t x = 0;
+	int32_t s = in & 0x8000;
+	int32_t e = (in & 0x7c00) >> 10;
+	int32_t m = in & 0x03ff;
+	uint32_t out = 0;
 	void* ptr;
-	
-  s <<= 16;
-  if (e == 31) {
-    // infinity or NAN
-    e = 255 << 23;
-    m <<= 13;
-    x = s | e | m;
-  } else if (e > 0) {
-    // normalized
-    e = e + (127 - 15);
-    e <<= 23;
-    m <<= 13;
-    x = s | e | m;
-  } else if (m == 0) {
-    // zero
-    x = s;
-  } else {
-    // subnormal, value is m times 2^-24
-    float f = ((float) m);
-    ptr = &f;
-    x = s | (*(uint32_t*)ptr - (24 << 23));
-  }
-  ptr = &x;
-  
-  return(*((float*)ptr));
+
+	s <<= 16;
+	if (e == 31) 
+	{
+		// infinity or NAN
+		e = 255L << 23;
+		m <<= 13;
+		out = s | e | m;
+	} else if (e > 0) {
+		// normalized
+		e += (127 - 15);
+		e <<= 23;
+		m <<= 13;
+		out = s | e | m;
+	} else if (m == 0) {
+		// zero
+		out = s;
+	} else {
+		// subnormal, value is m times 2^-24
+		float f = ((float) m);
+		ptr = &f;
+		out = s | (*(uint32_t*)ptr - (24L << 23));
+	}
+	ptr = &out;
+	return(*((float*)ptr));
 }
 
 
-float16_t float16(float f)
-{
-	void* ptr = &f;
-	uint32_t k = *((uint32_t*)ptr);
-	float16_t h = 0;
-
-  int e = (k >> 23) & 0x000000ff;
-  int s = (k >> 16) & 0x00008000;
-  int m = k & 0x007fffff;
-
-  e = e - 127;
-  if (e == 128) {
-    // infinity or NAN; preserve the leading bits of mantissa
-    // because they tell whether it's a signaling or quiet NAN
-    h = s | (31 << 10) | (m >> 13);
-  } else if (e > 15) {
-    // overflow to infinity
-    h = s | (31 << 10);
-  } else if (e > -15) {
-    // normalized case
-    if ((m & 0x00003fff) == 0x00001000) {
-      // tie, round down to even
-      h = s | ((e+15) << 10) | (m >> 13);
-    } else {
-      // all non-ties, and tie round up to even
-      //   (note that a mantissa of all 1's will round up to all 0's with
-      //   the exponent being increased by 1, which is exactly what we want;
-      //   for example, "0.5-epsilon" rounds up to 0.5, and 65535.0 rounds
-      //   up to infinity.)
-      h = s | ((e+15) << 10) + ((m + 0x00001000) >> 13);
-    }
-  } else if (e > -25) {
-    // convert to subnormal
-    m |= 0x00800000; // restore the implied bit
-    e = -14 - e; // shift count
-    m >>= e; // M now in position but 2^13 too big
-    if ((m & 0x00003fff) == 0x00001000) {
-      // tie round down to even
-    } else {
-      // all non-ties, and tie round up to even
-      m += (1 << 12); // m += 0x00001000
-    }
-    m >>= 13;
-    h = s | m;
-  } else {
-    // zero, or underflow
-    h = s;
-  }
-  return h;
-};

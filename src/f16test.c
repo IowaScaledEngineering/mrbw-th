@@ -43,11 +43,7 @@ int main(int argc, char* argv[])
    printf(" Output: [%02X %02X]\n", out>>8, (uint8_t)out);
    printf(" F16: sign=%d, exp=%d, mantissa=%d\n", (out & 0x8000)?1:0, 0x1F & (out>>10), inint & 0x3FF);
 
-   out = float16(in);
-   printf(" Output: [%02X %02X]\n", out>>8, (uint8_t)out);
-   printf(" F16: sign=%d, exp=%d, mantissa=%d\n", (out & 0x8000)?1:0, 0x1F & (out>>10), inint & 0x3FF);
-
-   in = float32(out);
+   in = F16toF32(out);
    inint = *(uint32_t*)ptr;
    
    printf(" Regurgitated Input:  %f  [%02X %02X %02X %02X]\n", in, (uint8_t)(inint>>24), (uint8_t)(inint>>16), (uint8_t)(inint>>8), (uint8_t)inint);
