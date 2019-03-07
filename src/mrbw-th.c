@@ -449,10 +449,8 @@ ISR(TIMER0_COMPA_vect)
 		ticks = 0;
 		decisecs++;
 
-#ifdef SHT3X
 		if (sht3x_read_countdown)
 			sht3x_read_countdown--;
-#endif
 
 		if (xbeeIdleCountdown)
 			xbeeIdleCountdown--;
@@ -609,6 +607,10 @@ int main(void)
 				break;
 
 			case TH_STATE_WAKE:
+				PRR &= ~(_BV(PRTWI) | _BV(PRTIM0) | _BV(PRADC));
+				initializeADC();
+				enableExternal33();
+				i2c_master_init();
 				thState = TH_STATE_IDLE;
 				break;
 
@@ -623,7 +625,7 @@ int main(void)
 						decisecsCopy = decisecs;
 					}
 
-					//PRR |= _BV(PRTWI) | _BV(PRTIM2) | _BV(PRTIM1) | _BV(PRTIM0) | _BV(PRSPI) | _BV(PRADC);
+					PRR |= _BV(PRTWI) | _BV(PRTIM2) | _BV(PRTIM1) | _BV(PRTIM0) | _BV(PRSPI) | _BV(PRADC);
 
 					decisecsCopy += system_sleep(pkt_period - decisecsCopy);
 
