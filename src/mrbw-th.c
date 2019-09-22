@@ -540,7 +540,7 @@ void init(void)
 
 int main(void)
 {
-	THState thState = TH_STATE_IDLE;
+	THState thState = TH_STATE_TRIGGER;
 	
 	// Application initialization
 	init();
@@ -562,7 +562,6 @@ int main(void)
 		switch(thState)
 		{
 			case TH_STATE_IDLE:
-				//toggleDebug();
 				ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
 				{
 					if (decisecs >= pkt_period)

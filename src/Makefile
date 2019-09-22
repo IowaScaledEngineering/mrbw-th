@@ -40,7 +40,7 @@ DEVICE  = atmega328p
 F_CPU   = 11059200  # Hz
 FUSE_L  = 0xD7
 FUSE_H  = 0xD5
-FUSE_E  = 0x00
+FUSE_E  = 0xFD
 # 3.3V with AA-cell using 3528
 VDD     = 33   # Voltage in decivolts
 VINDIV  = 1    # Reciprocal of VIN divider ratio
@@ -55,7 +55,8 @@ VINDIV  = 1    # Reciprocal of VIN divider ratio
 SENSOR=SHT3X
 
 # MRBee
-MRBEE_DEFINES = -DMRBEE -DMRBEE_IGNORE_FLOW
+#MRBEE_DEFINES = -DMRBEE -DMRBEE_IGNORE_FLOW
+MRBEE_DEFINES = -DMRBEE
 MRBEE_PINS = 
 
 # -DGIT_REV=0x$(GITREV)L -D'VERSION_STRING="$(REV)"'
