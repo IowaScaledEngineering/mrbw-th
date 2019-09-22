@@ -69,7 +69,7 @@ AVRDUDE_SLOW = avrdude -P $(PROGRAMMER_PORT) -c $(PROGRAMMER_TYPE) -p $(DEVICE) 
 
 OBJS = ${SRCS:.c=.o}
 INCLUDES = -I. -I$(MRBUS_LIB) -I$(I2C_LIB)
-CFLAGS  = $(INCLUDES) -Wall -Os -ffunction-sections -Wl,-gc-sections
+CFLAGS  = $(INCLUDES) -Wall -Os -ffunction-sections -Wl,-gc-sections -std=gnu11
 
 COMPILE = avr-gcc $(DEFINES) -D$(SENSOR) -DVDD=$(VDD) -DVINDIV=$(VINDIV) $(CFLAGS) -mmcu=$(DEVICE)
 
