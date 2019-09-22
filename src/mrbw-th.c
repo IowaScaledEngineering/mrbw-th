@@ -28,6 +28,7 @@ LICENSE:
 #include <avr/interrupt.h>
 #include <avr/eeprom.h>
 #include <util/delay.h>
+#include <util/atomic.h>
 
 #include "mrbee.h"
 #include "avr-i2c-master.h"
@@ -472,6 +473,13 @@ typedef enum
 	TH_STATE_SLEEP         = 0x70
 } THState;
 
+void toggleDebug()
+{
+	PORTD |= _BV(PD5);
+	_delay_us(20);
+	PORTD &= ~_BV(PD5);
+}
+
 
 void init(void)
 {
@@ -483,25 +491,45 @@ void init(void)
 	DDRB = 0;
 	PORTB = 0xFF;
 
-	DDRC = _BV(PC2); // External 3.3V enable pin	
+	DDRC = _BV(PC2); // External 3.3V enable pin
 	PORTC = 0xFF;
 	PORTC &= ~(_BV(PC2));
 
 	// Set sleep pin to output; drive low
-	DDRD = _BV(PD4) | _BV(PD2);
-	PORTD = 0xFF;
+	DDRD = _BV(PD4) | _BV(PD2) | _BV(PD5);
+	PORTD = 0xFF & ~_BV(PD5);
 
 	// Initialize MRBus address from EEPROM address 1
 	mrbus_dev_addr = eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_ADDR);
+	// Bogus addresses, fix to default address
+	if (0xFF == mrbus_dev_addr || 0x00 == mrbus_dev_addr)
+	{
+		mrbus_dev_addr = 0x03;
+		eeprom_write_byte((uint8_t*)MRBUS_EE_DEVICE_ADDR, mrbus_dev_addr);
+		mrbus_dev_addr = eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_ADDR);
+	}
 
 	mrbusPktQueueInitialize(&mrbeeTxQueue, mrbusTxPktBufferArray, MRBUS_TX_BUFFER_DEPTH);
 	mrbusPktQueueInitialize(&mrbeeRxQueue, mrbusRxPktBufferArray, MRBUS_RX_BUFFER_DEPTH);
 	mrbeeInit();
 
 	// Initialize MRBus packet update interval from EEPROM
-	pkt_period = ((eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_UPDATE_H) << 8) & 0xFF00) | (eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_UPDATE_L) & 0x00FF);
+	pkt_period = (uint16_t)eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_UPDATE_L) 
+		| (((uint16_t)eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_UPDATE_H)) << 8);
+	if (0xFFFF == pkt_period)
+	{
+		// It's uninitialized - go ahead and set it to 30 seconds, since this is a TH
+		eeprom_write_byte((uint8_t*)MRBUS_EE_DEVICE_UPDATE_L, 0x2C);
+		eeprom_write_byte((uint8_t*)MRBUS_EE_DEVICE_UPDATE_H, 0x01);
+
+		pkt_period = (uint16_t)eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_UPDATE_L) 
+			| (((uint16_t)eeprom_read_byte((uint8_t*)MRBUS_EE_DEVICE_UPDATE_H)) << 8);
+	}
+	// This line assures that pkt_period is at least 1
+	pkt_period = max(1, pkt_period);
 
 	enableExternal33();
+	disableXB3();
 	i2c_master_init();
 
 	initializeADC();
@@ -534,6 +562,7 @@ int main(void)
 		switch(thState)
 		{
 			case TH_STATE_IDLE:
+				//toggleDebug();
 				ATOMIC_BLOCK(ATOMIC_RESTORESTATE)
 				{
 					if (decisecs >= pkt_period)
@@ -562,7 +591,6 @@ int main(void)
 					float humidity = 0.0;
 					float16_t k;
 					memset(mrbusTxBuffer, 0, sizeof(mrbusTxBuffer));
-
 					sht3x_read_value(&temperature, &humidity);
 
 					mrbusTxBuffer[MRBUS_PKT_SRC] = mrbus_dev_addr;
@@ -574,8 +602,6 @@ int main(void)
 					mrbusTxBuffer[7] = (uint8_t)k;
 					mrbusTxBuffer[8] = (uint8_t)humidity;
 					mrbusTxBuffer[9] = busVoltage / 248;  // 1023 = 3.3V, therefore 1023 * 8 / 33 = 248
-					
-
 					mrbusPktQueuePush(&mrbeeTxQueue, mrbusTxBuffer, mrbusTxBuffer[MRBUS_PKT_LEN]);
 				}
 				thState = TH_STATE_SEND_PACKET;
