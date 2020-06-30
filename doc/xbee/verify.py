@@ -35,6 +35,7 @@ try:
 	xbeeParam("RR", 6)
 	xbeeParam("RN", 3)
 	xbeeParam("PL", 4)
+        xbeeParam("PP", 19)
 	xbeeParam("SM", 1)
 	xbeeParam("BD", 7)
 	xbeeParam("AP", 2)

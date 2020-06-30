@@ -25,6 +25,7 @@
 
 FIRMWARE = /opt/Digi/XCTU-NG/radio_firmwares/XB3-24A/XB3-24A_2003.xml
 PROFILE = xb3_2003.xpro
+PROFILE_PETERSEN = xb3_2003_petersen.xpro
 
 BAUD = 9600
 NEWBAUD = 115200
@@ -45,6 +46,12 @@ profile: $(PROFILE)
 
 profile115k: $(PROFILE)
 	/opt/Digi/XCTU-NG/XCTUcmd load_profile -f $(PROFILE) -p $(PORT) -b $(NEWBAUD) -F -v
+
+petersen: $(PROFILE)
+	/opt/Digi/XCTU-NG/XCTUcmd load_profile -f $(PROFILE_PETERSEN) -p $(PORT) -b $(BAUD) -F -v
+
+petersen115k: $(PROFILE)
+	/opt/Digi/XCTU-NG/XCTUcmd load_profile -f $(PROFILE_PETERSEN) -p $(PORT) -b $(NEWBAUD) -F -v
 
 verify: 
 	/usr/bin/python verify.py $(PORT) $(NEWBAUD)
