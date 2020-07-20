@@ -66,7 +66,7 @@ footprint=SOT26
 T 51100 45800 5 10 0 1 0 6 1
 footprint=SOT26
 T 49000 46600 5 10 1 1 0 6 1
-device=AP63205
+device=AP63203
 T 49000 46800 5 10 1 1 0 6 1
 refdes=U1
 }
