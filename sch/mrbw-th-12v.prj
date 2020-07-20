@@ -1,0 +1,4 @@
+schematics mrbw-th-12v.sch
+output-name ../pcb/mrbw-th-12v
+skip-m4
+elements-dir ../../../footprints
