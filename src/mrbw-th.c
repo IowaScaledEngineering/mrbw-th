@@ -408,11 +408,14 @@ uint16_t system_sleep(uint16_t sleep_decisecs)
 	sleep_disable();
 
 	// If you don't want the watchdog to do system reset, remove this chunk of code
+	cli();
 	wdt_reset();
-	MCUSR &= ~(_BV(WDRF));
+	wdt_enable(WDTO_1S);
+/*	MCUSR &= ~(_BV(WDRF));
 	WDTCSR |= _BV(WDE) | _BV(WDCE);
-	WDTCSR = _BV(WDE) | _BV(WDP2) | _BV(WDP1); // Set the WDT to system reset and 1s timeout
+	WDTCSR = _BV(WDE) | _BV(WDP2) | _BV(WDP1); // Set the WDT to system reset and 1s timeout*/
 	wdt_reset();
+	sei();
 
 	return(slept);
 }
